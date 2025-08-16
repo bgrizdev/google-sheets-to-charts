@@ -1,0 +1,16 @@
+{
+  "name": "google-sheets-to-charts",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "wp-scripts build && cp src/frontend.js build/frontend.js",
+    "start": "wp-scripts start"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@wordpress/scripts": "^30.19.0"
+  }
+}
