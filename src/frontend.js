@@ -1,44 +1,20 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const canvas = document.getElementById('sheets-chart');
-    if (!canvas) return;
+    document.querySelectorAll('.sheets-chart-block').forEach(block => {
+        const sheetId = block.dataset.sheetId;
+        const label = block.dataset.label;
+        const stats = block.dataset.stats;
+        const overlay = block.dataset.overlay;
 
-    fetch('/wp-json/sheets-chart/v1/data')
-        .then(res => res.json())
-        .then(data => {
-            const [headers, ...rows] = data;
+        // Output to console
+        console.log('Sheet ID:', sheetId);
+        console.log('Label Range:', label);
+        console.log('Stats Range:', stats);
+        console.log('Overlay Range:', overlay);
 
-            const labels = rows.map(row => row[0]); // Product Name
-            const descriptions = rows.map(row => row[1]); // Description (string)
-            const values = rows.map(row => parseFloat(row[2])); // Rating (number)
-
-            new Chart(canvas, {
-                type: 'bar',
-                data: {
-                    labels,
-                    datasets: [{
-                        label: 'Product Rating',
-                        data: values,
-                        backgroundColor: 'rgba(54, 162, 235, 0.5)'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 5
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            callbacks: {
-                                afterLabel: function(context) {
-                                    return descriptions[context.dataIndex];
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        });
+        // Or render in the DOM (optional)
+        block.innerHTML = `<p><strong>Sheet ID:</strong> ${sheetId}</p>
+            <p><strong>Label Range:</strong> ${label}</p>
+            <p><strong>Label Range:</strong> ${stats}</p>
+            <p><strong>Label Range:</strong> ${overlay}</p>`;
+    });
 });
