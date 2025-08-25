@@ -49,7 +49,7 @@ add_action('rest_api_init', function () {
         'methods' => 'POST',
         'callback' => 'sheets_chart_fetch_and_cache_data',
         'permission_callback' => function () {
-            return current_user_can('edit_posts'); // only allow editors/admins
+            return current_user_can('edit_posts'); 
         }
     ]);
 });
@@ -100,22 +100,48 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
 
 }
 
+// add endpoint for cached data
 
-// add CDN support for chart.js
+add_action('rest_api_init', function () {
+    register_rest_route('sheets-chart/v1', '/cached', [
+        'methods' => 'GET',
+        'callback' => 'sheets_chart_fetch_cached_data',
+        'permission_callback' => function () {
+            return current_user_can('edit_posts'); 
+        }
+    ]);
+});
+
+function sheets_chart_fetch_cached_data( WP_REST_Request $req ) {
+    $sheet_id = sanitize_text_field( $req->get_param('sheetId') );
+    $upload_dir = wp_upload_dir();
+    $file = trailingslashit($upload_dir['basedir']) . 'sheets-cache/' . $sheet_id . '.json';
+    if ( ! file_exists($file) ) {
+      return new WP_Error('no_cache', 'No cached file', ['status' => 404]);
+    }
+    $data = json_decode(file_get_contents($file), true);
+    return rest_ensure_response($data);
+}   
+
+
+
 add_action('wp_enqueue_scripts', function () {
     wp_enqueue_script(
-        'chartjs',
-        'https://cdn.jsdelivr.net/npm/chart.js',
-        [],
-        null,
-        true
-    );
-    
-    wp_enqueue_script(
-        'sheets-chart-render',
-        plugin_dir_url(__FILE__) . 'build/frontend.js',
+        'sheets-chart-view',
+        plugins_url('build/frontend.js', __FILE__),
         [],
         filemtime(plugin_dir_path(__FILE__) . 'build/frontend.js'),
         true
     );
 });
+
+//add_action('enqueue_block_editor_assets', function () {
+//    wp_enqueue_script(
+//        'sheets-chart-editor',
+//        plugins_url('build/index.js', __FILE__),
+//        ['wp-blocks','wp-element','wp-components','wp-block-editor','wp-api-fetch'],
+//        filemtime(plugin_dir_path(__FILE__) . 'build/index.js'),
+//        true
+//    );
+//});
+

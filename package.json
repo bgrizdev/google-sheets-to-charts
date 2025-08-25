@@ -12,5 +12,8 @@
   "description": "",
   "devDependencies": {
     "@wordpress/scripts": "^30.19.0"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.0"
   }
 }
