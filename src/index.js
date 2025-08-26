@@ -4,6 +4,7 @@ import { TabPanel, TextControl, Button, Tooltip, ColorPicker } from '@wordpress/
 import { createElement, useState, useRef, useEffect } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
 import Chart from 'chart.js/auto';
+import { color } from 'chart.js/helpers';
 
 registerBlockType('sheets/chart-block', {
     title: 'Sheets Chart Block',
@@ -55,12 +56,12 @@ registerBlockType('sheets/chart-block', {
                 ctx.save();
                 meta.data.forEach((bar, index) => {
                 const value = dataset.data[index];
-                const x = bar.x; 
+                const x = bar.x - 10; 
                 const y = bar.y;
 
                 // Draw circle
                 ctx.beginPath();
-                ctx.arc(x, y, 16, 0, 2 * Math.PI);
+                ctx.arc(x, y, 10, 0, 2 * Math.PI);
                 ctx.fillStyle = '#fff';
                 ctx.fill();
                 ctx.lineWidth = 2;
@@ -69,7 +70,7 @@ registerBlockType('sheets/chart-block', {
 
                 // Draw value text
                 ctx.fillStyle = '#000';
-                ctx.font = 'bold 12px sans-serif';
+                ctx.font = 'bold 10px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(value, x, y);
@@ -77,6 +78,22 @@ registerBlockType('sheets/chart-block', {
                 ctx.restore();
             }
         };
+
+        // helper function to generate opacity for each bar 
+        function addAlphaToHex(baseColor, alpha) {
+            // strip leading "#" if present
+            const hex = baseColor.replace('#', '');
+
+            const fullHex = hex.length === 3
+                ? hex.split('').map(x => x + x).join('')
+                : hex;
+
+            const alphaHex = Math.round(alpha * 255)
+                .toString(16)
+                .padStart(2, '0');
+
+            return `#${fullHex}${alphaHex}`;
+        }
 
         const fetchData = async () => {
             setStatus('Fetching...');
@@ -110,11 +127,22 @@ registerBlockType('sheets/chart-block', {
             }
         };
 
-        // creates the chart with data, adding
+        // creates the chart with data, updates on data change or color changes 
         useEffect(() => {
         if (!previewData || !canvasRef.current) return;
 
         const { labels, values, overlays } = normalizeForChart(previewData);
+
+        // apply opacity to colors for bar rankings
+        const maxVal = Math.max(...values);
+        const minVal = Math.min(...values);
+
+        const colors = values.map(v => {
+            // normalize value → between 0.5 (lowest opacity) and 1 (fully opaque)
+            const t = (v - minVal) / (maxVal - minVal); 
+            const alpha = 0.5 + t * 0.5; // range 0.5 → 1
+            return addAlphaToHex(attributes.barColor || '#3b82f6', alpha);
+        });
 
         if (!chartRef.current) {
             // first render: create chart
@@ -126,8 +154,8 @@ registerBlockType('sheets/chart-block', {
                 datasets: [{
                 label: 'Rating',
                 data: values,
-                backgroundColor: attributes.barColor || '#3b82f6',
-                borderColor:   attributes.barColor || '#3b82f6',
+                backgroundColor: colors,
+                borderColor:   attributes.barColor,
                 borderRadius: 20,
                 borderWidth: 1
                 }],
@@ -154,7 +182,10 @@ registerBlockType('sheets/chart-block', {
                     callbacks: {
                     afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
                     }
-                } : {}
+                } : {},
+                legend: {
+                    display: false
+                },
                 }
             },
             plugins: [circleLabelsPlugin],
