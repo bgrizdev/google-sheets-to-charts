@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "wp-scripts build && cp src/frontend.js build/frontend.js",
+    "build": "wp-scripts build src/index.js src/frontend.js",
     "start": "wp-scripts start"
   },
   "keywords": [],
@@ -12,5 +12,8 @@
   "description": "",
   "devDependencies": {
     "@wordpress/scripts": "^30.19.0"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.0"
   }
 }
