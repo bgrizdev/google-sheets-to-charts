@@ -4,5 +4,6 @@
   "title": "Sheets Chart Block",
   "category": "widgets",
   "icon": "chart-bar",
-  "editorScript": "sheets-chart-block"
+  "editorScript": "sheets-chart-block",
+  "viewScript":   "file:./frontend.js"
 }

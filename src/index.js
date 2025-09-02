@@ -4,7 +4,7 @@ import { TabPanel, TextControl, Button, Tooltip, ColorPicker } from '@wordpress/
 import { createElement, useState, useRef, useEffect } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
 import Chart from 'chart.js/auto';
-import { color } from 'chart.js/helpers';
+//import { color } from 'chart.js/helpers';
 
 registerBlockType('sheets/chart-block', {
     title: 'Sheets Chart Block',
@@ -16,11 +16,12 @@ registerBlockType('sheets/chart-block', {
         label: { type: 'string', default: 'A2:A13' },
         stats: { type: 'string', default: 'O2:O13' },
         overlay: { type: 'string', default: 'B2:B13' },
+        overlays:{ type: 'array',  default: ['B2:B13'] },
         barColor:{ type: 'string', default: '#3b82f6' }
     },
 
     edit: ({ attributes, setAttributes }) => {
-        const { sheetId, label, stats, overlay, barColor } = attributes;
+        const { sheetId, label, stats, overlay, overlays, barColor } = attributes;
         const blockProps = useBlockProps();
         const [status, setStatus] = useState('');
         const [previewData, setPreviewData] = useState(null);
@@ -28,21 +29,41 @@ registerBlockType('sheets/chart-block', {
         const chartRef = useRef(null);
 
         // helper function to normalize data for chart
+        // data = { labels: string[], stats: string[], overlays: [{header, values, range}] }
         const normalizeForChart = (data) => {
-            if (!data) return { labels: [], values: [], overlays: [] };
+        if (!data) return { labels: [], values: [], overlays: [] };
 
-            const [labelsRaw, valuesRaw, overlaysRaw] = Object.values(data);
+        const labels = Array.isArray(data.labels) ? data.labels.map(String) : [];
 
-            const labels = (labelsRaw || []).map(r => String(r?.[0] ?? ''));
-            const values = (valuesRaw || []).map(r => {
-                const raw = String(r?.[0] ?? '');
-                const num = parseFloat(raw.replace(/[^\d.-]/g, ''));
-                return Number.isFinite(num) ? num : 0;
-            });
-            const overlays = (overlaysRaw || []).map(r => String(r?.[0] ?? ''));
+        // parse numeric stats, stripping symbols like $ or %
+        const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
+            const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
+            return Number.isFinite(num) ? num : 0;
+        });
 
-            return { labels, values, overlays };
+        // Build one tooltip line per row by joining "Header: Value" for each overlay
+        const overlayDefs = Array.isArray(data.overlays) ? data.overlays : [];
+        const rowCount = Math.max(
+            labels.length,
+            values.length,
+            ...overlayDefs.map(o => (o?.values?.length ?? 0))
+        );
+
+        const overlays = Array.from({ length: rowCount }, (_, i) => {
+            const parts = [];
+            for (const o of overlayDefs) {
+            const v = o?.values?.[i];
+            if (v !== undefined && v !== null && String(v) !== '') {
+                const h = o?.header ? `${o.header}: ` : '';
+                parts.push(`${h}${v}`);
+            }
+            }
+            return parts.join(' • '); // what your tooltip reads via overlays[ctx.dataIndex]
+        });
+
+        return { labels, values, overlays };
         };
+
 
         // helper function to create plugin for custom chart labels 
         const circleLabelsPlugin = {
@@ -96,12 +117,15 @@ registerBlockType('sheets/chart-block', {
         }
 
         const fetchData = async () => {
+
+            console.log(overlays);
+
             setStatus('Fetching...');
             try {
                 await apiFetch({
                 path: '/sheets-chart/v1/fetch-data',
                 method: 'POST',
-                data: { sheetId, label, stats, overlay },
+                data: { sheetId, label, stats, overlays },
                 });
                 setStatus('Data fetched successfully.');
             } catch (err) {
@@ -212,6 +236,27 @@ registerBlockType('sheets/chart-block', {
             // eslint-disable-next-line react-hooks/exhaustive-deps
         }, [sheetId, label, stats, overlay]);
 
+    // repeater style fields for overlay controls 
+    
+    // check if overlays exists/is an array/is not empty
+    const overlaysArr =
+    (attributes.overlays && attributes.overlays.length)
+        ? attributes.overlays
+        : (attributes.overlay ? [attributes.overlay] : []);
+
+    // update overlay attribute search for value in overlaysArr and replace + clear legacy value if it exists 
+    const updateOverlay = (i, value) =>
+        setAttributes({
+            overlays: overlaysArr.map((r, idx) => (idx === i ? value : r)),
+            overlay: '' // clear legacy value
+    });
+    
+    // add item to overlay attribute
+    const addOverlay = () => setAttributes({ overlays: [...overlaysArr, ''] });
+
+    // remove item from overlay attribute
+    const removeOverlay = (i) => setAttributes({ overlays: overlaysArr.filter((_, idx) => idx !== i) });
+
     return createElement(
     'div',
     blockProps,
@@ -280,13 +325,19 @@ registerBlockType('sheets/chart-block', {
                 onChange: (value) => setAttributes({ stats: value }), // correct target
                 help: 'Enter the range of stats you want to display, e.g., O2:O13'
                 }),
-                createElement(TextControl, {
-                label: 'Overlay Range',
-                value: overlay,
-                placeholder: 'B2:B13',
-                onChange: (value) => setAttributes({ overlay: value }), // correct target
-                help: 'Enter the overlay data range, e.g., B2:B13'
-                }),
+                createElement('label', null, 'Overlay Ranges'),
+                overlaysArr.map((range, i) =>
+                    createElement('div', { key:i, style:{ display:'flex', gap:'8px', marginTop:'8px' } },
+                    createElement(TextControl, {
+                        label: `Overlay Range ${i+1}`,
+                        value: range,
+                        placeholder: 'B2:B13',
+                        onChange: (v) => updateOverlay(i, v)
+                    }),
+                    createElement(Button, { variant:'secondary', onClick: () => removeOverlay(i) }, 'Remove')
+                    )
+                ),
+                createElement(Button, { variant:'primary', onClick: addOverlay, style:{ marginTop:'8px' } }, 'Add overlay'),
 
                 // Buttons row
                 createElement(
@@ -327,18 +378,23 @@ registerBlockType('sheets/chart-block', {
 
     },
     save: ({ attributes }) => {
-        const { sheetId, label, stats, overlay } = attributes;
+    const { sheetId, label, stats, overlay, overlays = [], barColor } = attributes;
+    const overlaysToSave = overlays.length ? overlays : (overlay ? [overlay] : []);
 
     return createElement(
         'div',
         {
-            className: 'sheets-chart-block',
-            'data-sheet-id': sheetId,
-            'data-label': label,
-            'data-stats': stats,
-            'data-overlay': overlay
+        className: 'sheets-chart-block',
+        'data-sheet-id': sheetId,
+        'data-label': label,
+        'data-stats': stats,
+        'data-overlay': overlay,
+        'data-overlays': JSON.stringify(overlaysToSave),
+        'data-bar-color': barColor || '#3b82f6'
         },
-        `Sheet ID: ${sheetId}, Label Range: ${label}`
+        createElement('div', { className: 'sheets-chart-canvas-wrap', style: { height: '420px' } },
+        createElement('canvas', { className: 'sheets-chart-canvas' })
+        )
     );
     }
 });

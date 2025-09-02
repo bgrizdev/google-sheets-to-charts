@@ -21,27 +21,10 @@ add_action('init', function () {
         true
     );
 
-    error_log('register block');
-
     register_block_type(__DIR__ . '/build');
 });
 
 require_once __DIR__ . '/includes/sheets-api.php';
-
-// add endpoint for sheet data
-//add_action('rest_api_init', function () {
-//    register_rest_route('sheets-chart/v1', '/data', [
-//        'methods' => 'GET',
-//        'callback' => function () {
-//            $spreadsheetId = '1ocQtGKwZRr_Fk_o-CjTu7cP3Tp4cTlVcq457POVg23o';
-//            $range = 'Sheet1'; // adjust to match your sheet - grabs the whole sheet
-//
-//            $data = get_google_sheet_data($spreadsheetId, $range);
-//            return rest_ensure_response($data);
-//        },
-//        'permission_callback' => '__return_true'
-//    ]);
-//});
 
 // add endpoint for sheet data v2
 add_action('rest_api_init', function () {
@@ -58,11 +41,26 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
     $sheet_id = sanitize_text_field($request->get_param('sheetId'));
     $label    = sanitize_text_field($request->get_param('label'));
     $stats    = sanitize_text_field($request->get_param('stats'));
-    $overlay  = sanitize_text_field($request->get_param('overlay'));
+    //$overlay  = sanitize_text_field($request->get_param('overlay'));
+    
+    $overlays_param = $request->get_param('overlays');
+    error_log( 'overlays (raw): ' . wp_json_encode( $overlays_param ) );
 
-    $ranges = array_filter([$label, $stats, $overlay]);
+    if ( is_array( $overlays_param ) ) {
+        $overlays = array_values( array_filter( array_map( 'sanitize_text_field', $overlays_param ), 'strlen' ) );
+    } elseif ( is_string( $overlays_param ) && $overlays_param !== '' ) {
+        // if sent as a single string, normalize to array
+        $overlays = [ sanitize_text_field( $overlays_param ) ];
+    } else {
+        $overlays = [];
+    }
 
-    //$data = get_google_sheet_data_batch($sheet_id, [$label, $stats, $overlay]);
+    $ranges = array_values( array_filter( array_unique( array_merge(
+        array_filter( [$label, $stats], 'strlen' ),
+        $overlays
+    ) ) ) );
+
+    //$ranges = array_filter([$label, $stats, $overlay]);
 
     // Uploads cache directory
     $upload_dir = wp_upload_dir();
@@ -88,7 +86,9 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
     }
 
     // if file does not exist make it 
-    $data = get_google_sheet_data_batch($sheet_id, $ranges);
+    //$data = get_google_sheet_data_batch($sheet_id, $ranges);
+
+    $data = get_google_sheet_data_batch($sheet_id, $label, $stats, $overlays);
 
     if (is_wp_error($data)) {
         return new WP_Error('google_fetch_error', 'Failed to fetch Google Sheet data', ['status' => 500]);
@@ -105,10 +105,7 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
 add_action('rest_api_init', function () {
     register_rest_route('sheets-chart/v1', '/cached', [
         'methods' => 'GET',
-        'callback' => 'sheets_chart_fetch_cached_data',
-        'permission_callback' => function () {
-            return current_user_can('edit_posts'); 
-        }
+        'callback' => 'sheets_chart_fetch_cached_data'
     ]);
 });
 
@@ -122,26 +119,3 @@ function sheets_chart_fetch_cached_data( WP_REST_Request $req ) {
     $data = json_decode(file_get_contents($file), true);
     return rest_ensure_response($data);
 }   
-
-
-
-add_action('wp_enqueue_scripts', function () {
-    wp_enqueue_script(
-        'sheets-chart-view',
-        plugins_url('build/frontend.js', __FILE__),
-        [],
-        filemtime(plugin_dir_path(__FILE__) . 'build/frontend.js'),
-        true
-    );
-});
-
-//add_action('enqueue_block_editor_assets', function () {
-//    wp_enqueue_script(
-//        'sheets-chart-editor',
-//        plugins_url('build/index.js', __FILE__),
-//        ['wp-blocks','wp-element','wp-components','wp-block-editor','wp-api-fetch'],
-//        filemtime(plugin_dir_path(__FILE__) . 'build/index.js'),
-//        true
-//    );
-//});
-
