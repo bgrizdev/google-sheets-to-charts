@@ -1,6 +1,6 @@
 import { registerBlockType } from '@wordpress/blocks';
 import { useBlockProps } from '@wordpress/block-editor';
-import { TabPanel, TextControl, Button, Tooltip, ColorPicker } from '@wordpress/components';
+import { TabPanel, TextControl, Button, Tooltip, ColorPicker, RadioControl } from '@wordpress/components';
 import { createElement, useState, useRef, useEffect } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
 import Chart from 'chart.js/auto';
@@ -17,11 +17,12 @@ registerBlockType('sheets/chart-block', {
         stats: { type: 'string', default: 'O2:O13' },
         overlay: { type: 'string', default: 'B2:B13' },
         overlays:{ type: 'array',  default: ['B2:B13'] },
-        barColor:{ type: 'string', default: '#3b82f6' }
+        barColor:{ type: 'string', default: '#3b82f6' },
+        chartType:{ type: 'string', default: 'bar' },
     },
 
     edit: ({ attributes, setAttributes }) => {
-        const { sheetId, label, stats, overlay, overlays, barColor } = attributes;
+        const { sheetId, label, stats, overlay, overlays, barColor, chartType } = attributes;
         const blockProps = useBlockProps();
         const [status, setStatus] = useState('');
         const [previewData, setPreviewData] = useState(null);
@@ -100,6 +101,96 @@ registerBlockType('sheets/chart-block', {
             }
         };
 
+        // helper for chartType config settings
+        function getChartConfig(type, { labels, values, overlays, colors, barColor }) {
+            if (type === 'scatter') {
+                // Scatter expects [{x, y}] points and linear scales
+                const points = values.map((y, i) => ({ x: i, y }));
+                return {
+                type: 'scatter',
+                data: {
+                    // labels are optional for scatter; we’ll show them in tooltip
+                    datasets: [{
+                    label: 'Rating',
+                    data: points,
+                    backgroundColor: colors,
+                    borderColor: barColor,
+                    pointRadius: 5,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                    x: {
+                        type: 'linear',
+                        ticks: {
+                        // show original labels for indices
+                        callback: (value) => labels[value] ?? value,
+                        },
+                        grid: { display: false },
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { color: '#000', font: { size: 14 } },
+                    },
+                    },
+                    plugins: {
+                    legend: { display: false },
+                    tooltip: overlays.length ? {
+                        callbacks: {
+                        label: (ctx) => {
+                            const i = ctx.dataIndex;
+                            const name = labels[i] ?? `#${i + 1}`;
+                            const val  = ctx.parsed?.y ?? '';
+                            const extra = overlays[i] ? ` ${overlays[i]}` : '';
+                            return `${name}: ${val}${extra}`;
+                        },
+                        },
+                    } : {},
+                    },
+                },
+                plugins: [], // no circleLabelsPlugin on scatter
+                };
+            }
+
+            // default: bar
+            return {
+                type: 'bar',
+                data: {
+                labels,
+                datasets: [{
+                    label: 'Rating',
+                    data: values,
+                    backgroundColor: colors,
+                    borderColor: barColor,
+                    borderRadius: 20,
+                    borderWidth: 1,
+                }],
+                },
+                options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { grid: { display: false }, ticks: { display: false } },
+                    y: { grid: { display: false }, ticks: { color: '#000', font: { size: 14 } } },
+                },
+                elements: { categoryPercentage: 1.5 },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: overlays.length ? {
+                    callbacks: {
+                        afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
+                    },
+                    } : {},
+                },
+                },
+                plugins: [circleLabelsPlugin],
+            };
+        }
+
+
         // helper function to generate opacity for each bar 
         function addAlphaToHex(baseColor, alpha) {
             // strip leading "#" if present
@@ -157,78 +248,100 @@ registerBlockType('sheets/chart-block', {
 
         const { labels, values, overlays } = normalizeForChart(previewData);
 
-        // apply opacity to colors for bar rankings
+        // opacity scaling for colors
         const maxVal = Math.max(...values);
         const minVal = Math.min(...values);
-
+        const denom  = Math.max(1, maxVal - minVal); // avoid divide-by-zero
         const colors = values.map(v => {
-            // normalize value → between 0.5 (lowest opacity) and 1 (fully opaque)
-            const t = (v - minVal) / (maxVal - minVal); 
-            const alpha = 0.5 + t * 0.5; // range 0.5 → 1
+            const t = (v - minVal) / denom;         // 0..1
+            const alpha = 0.5 + t * 0.5;            // 0.5..1
             return addAlphaToHex(attributes.barColor || '#3b82f6', alpha);
         });
 
-        if (!chartRef.current) {
-            // first render: create chart
-            const ctx = canvasRef.current.getContext('2d');
-            chartRef.current = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                label: 'Rating',
-                data: values,
-                backgroundColor: colors,
-                borderColor:   attributes.barColor,
-                borderRadius: 20,
-                borderWidth: 1
-                }],
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        grid: { display: false },
-                        ticks: { display: false },
-                    },
-                    y: {
-                        grid: { display: false },
-                        ticks: { color: '#000', font: { size: 14 }},
-                    },
-                },
-                elements: {
-                    categoryPercentage: 1.5
-                },
-                plugins: {
-                tooltip: overlays.length ? {
-                    callbacks: {
-                    afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
-                    }
-                } : {},
-                legend: {
-                    display: false
-                },
-                }
-            },
-            plugins: [circleLabelsPlugin],
-            });
-        } else {
-            // updates: mutate and update
-            const chart = chartRef.current;
-            chart.data.labels = labels;
-            chart.data.datasets[0].data = values;
-            chart.data.datasets[0].backgroundColor = attributes.barColor || '#3b82f6';
-            chart.data.datasets[0].borderColor     = attributes.barColor || '#3b82f6';
-            chart.options.plugins.tooltip = overlays.length ? {
-            callbacks: {
-                afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
-            }
-            } : {};
-            chart.update();
+        // rebuild chart when type OR data OR color changes
+        if (chartRef.current) {
+          chartRef.current.destroy();
+          chartRef.current = null;
         }
-        }, [previewData, attributes.barColor]);  // redraw when data OR color changes
+
+        const ctx = canvasRef.current.getContext('2d');
+        const cfg = getChartConfig(attributes.chartType, {
+            labels,
+            values,
+            overlays,
+            colors,
+            barColor: attributes.barColor || '#3b82f6',
+        });
+
+        chartRef.current = new Chart(ctx, cfg);
+
+          return () => {
+            chartRef.current?.destroy();
+            chartRef.current = null;
+        };
+
+        // OLD BELOW
+        //if (!chartRef.current) {
+        //    // first render: create chart
+        //    const ctx = canvasRef.current.getContext('2d');
+        //    chartRef.current = new Chart(ctx, {
+        //    type: 'bar',
+        //    data: {
+        //        labels,
+        //        datasets: [{
+        //        label: 'Rating',
+        //        data: values,
+        //        backgroundColor: colors,
+        //        borderColor:   attributes.barColor,
+        //        borderRadius: 20,
+        //        borderWidth: 1
+        //        }],
+        //    },
+        //    options: {
+        //        indexAxis: 'y',
+        //        responsive: true,
+        //        maintainAspectRatio: false,
+        //        scales: {
+        //            x: {
+        //                grid: { display: false },
+        //                ticks: { display: false },
+        //            },
+        //            y: {
+        //                grid: { display: false },
+        //                ticks: { color: '#000', font: { size: 14 }},
+        //            },
+        //        },
+        //        elements: {
+        //            categoryPercentage: 1.5
+        //        },
+        //        plugins: {
+        //        tooltip: overlays.length ? {
+        //            callbacks: {
+        //            afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
+        //            }
+        //        } : {},
+        //        legend: {
+        //            display: false
+        //        },
+        //        }
+        //    },
+        //    plugins: [circleLabelsPlugin],
+        //    });
+        //} else {
+        //    // updates: mutate and update
+        //    const chart = chartRef.current;
+        //    chart.data.labels = labels;
+        //    chart.data.datasets[0].data = values;
+        //    chart.data.datasets[0].backgroundColor = attributes.barColor || '#3b82f6';
+        //    chart.data.datasets[0].borderColor     = attributes.barColor || '#3b82f6';
+        //    chart.options.plugins.tooltip = overlays.length ? {
+        //    callbacks: {
+        //        afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
+        //    }
+        //    } : {};
+        //    chart.update();
+        //}
+        }, [previewData, attributes.barColor, attributes.chartType]); 
 
         // loads the preview up  
         useEffect(() => {
@@ -322,7 +435,7 @@ registerBlockType('sheets/chart-block', {
                 label: 'Stat Range',
                 value: stats,
                 placeholder: 'O2:O13',
-                onChange: (value) => setAttributes({ stats: value }), // correct target
+                onChange: (value) => setAttributes({ stats: value }),
                 help: 'Enter the range of stats you want to display, e.g., O2:O13'
                 }),
                 createElement('label', null, 'Overlay Ranges'),
@@ -338,6 +451,16 @@ registerBlockType('sheets/chart-block', {
                     )
                 ),
                 createElement(Button, { variant:'primary', onClick: addOverlay, style:{ marginTop:'8px' } }, 'Add overlay'),
+                createElement(RadioControl, {
+                    label: 'Chart Type',
+                    selected: chartType,
+                    options: [
+                        { label: 'Bar', value: 'bar' },
+                        { label: 'Scatter', value: 'scatter' },
+                    ],
+                    onChange: (selected) => setAttributes({ chartType: selected }), 
+                    help: 'Select the bar type to use.'
+                }),
 
                 // Buttons row
                 createElement(
@@ -378,7 +501,7 @@ registerBlockType('sheets/chart-block', {
 
     },
     save: ({ attributes }) => {
-    const { sheetId, label, stats, overlay, overlays = [], barColor } = attributes;
+    const { sheetId, label, stats, overlay, overlays = [], barColor, chartType } = attributes;
     const overlaysToSave = overlays.length ? overlays : (overlay ? [overlay] : []);
 
     return createElement(

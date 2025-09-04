@@ -73,6 +73,7 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
 
     // check if file already exists 
     if ( file_exists( $filename ) ) {
+        error_log('cache used');
         $cached = file_get_contents( $filename );
         $json   = json_decode( $cached, true );
         if ( $json !== null ) {
@@ -87,17 +88,14 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
 
     // if file does not exist make it 
     //$data = get_google_sheet_data_batch($sheet_id, $ranges);
-
+    error_log('data fetched');
     $data = get_google_sheet_data_batch($sheet_id, $label, $stats, $overlays);
-
     if (is_wp_error($data)) {
+        error_log('error fetching data: ' . $data->get_error_message());
         return new WP_Error('google_fetch_error', 'Failed to fetch Google Sheet data', ['status' => 500]);
     }
-
     file_put_contents($filename, wp_json_encode($data));
-
     return rest_ensure_response(['success' => true, 'message' => 'Data saved.', 'path' => $filename]);
-
 }
 
 // add endpoint for cached data
