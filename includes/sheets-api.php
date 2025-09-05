@@ -24,11 +24,21 @@
 
 function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange, string $statsRange, array $overlayRanges ): array {
     require_once __DIR__ . '/../vendor/autoload.php';
+    $log('Composer autoload loaded', ['path' => __DIR__ . '/../vendor/autoload.php']);
+
+    $credPath = __DIR__ . '/includes/credentials/service-account.jso';
+    if (!file_exists($credPath)) {
+        $log('ERROR: service account credentials file not found', ['credPath' => $credPath]);
+        // proceed, but this will likely throw on setAuthConfig
+    } else {
+        $log('Credentials file found', ['credPath' => $credPath]);
+    }
 
     $client = new \Google_Client();
-    $client->setAuthConfig(__DIR__ . '/../credentials/service-account.json');
+    $client->setAuthConfig($credPath);
     $client->addScope(\Google_Service_Sheets::SPREADSHEETS_READONLY);
     $service = new \Google_Service_Sheets($client);
+    $log('Google client initialized and scoped');
 
     // Helper: get column letters (and ignore sheet names if present)
     $colFromRange = function (string $range): ?string {
@@ -38,6 +48,7 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
         if (preg_match('/^([A-Za-z]+)\d+/', $range, $m)) {
             return strtoupper($m[1]);
         }
+        error_log('failed at colFromRange');
         return null;
     };
 
@@ -67,6 +78,7 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
                 return $v;
             }
         }
+        error_log('failed at getBySuffix');
         return [];
     };
 

@@ -102,8 +102,9 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
 
 add_action('rest_api_init', function () {
     register_rest_route('sheets-chart/v1', '/cached', [
-        'methods' => 'GET',
-        'callback' => 'sheets_chart_fetch_cached_data'
+        'methods'             => 'GET',
+        'callback'            => 'sheets_chart_fetch_cached_data',
+        'permission_callback' => '__return_true',
     ]);
 });
 
