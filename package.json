@@ -2,6 +2,14 @@
   "name": "google-sheets-to-chart",
   "version": "1.0.0",
   "main": "index.js",
+    "files": [
+    "build",
+    "includes",
+    "vendor",
+    "package.json",
+    "composer.json",
+    "google-sheets-to-chart.php"
+  ],
   "scripts": {
     "build": "wp-scripts build src/index.js src/frontend.js",
     "start": "wp-scripts start",

@@ -151,7 +151,7 @@ async function renderBlock(blockEl) {
     if (wrap) {
       wrap.innerHTML = '<em style="font:14px/1.4 sans-serif">No cached data yet. Please fetch data in the editor.</em>';
     }
-    // console.error(e);
+    console.error(e);
   }
 }
 
