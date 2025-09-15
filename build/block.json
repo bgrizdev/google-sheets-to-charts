@@ -1,9 +1,52 @@
 {
-  "apiVersion": 2,
+  "apiVersion": 3,
   "name": "sheets/chart-block",
   "title": "Sheets Chart Block",
   "category": "widgets",
   "icon": "chart-bar",
   "editorScript": "sheets-chart-block",
-  "viewScript": "file:./frontend.js"
+  "viewScript": "file:./frontend.js",
+  "attributes": {
+    "title": {
+      "type": "string",
+      "default": ""
+    },
+    "blockId": {
+      "type": "string",
+      "default": ""
+    },
+    "sheetId": {
+      "type": "string",
+      "default": ""
+    },
+    "label": {
+      "type": "string",
+      "default": "A2:A13"
+    },
+    "stats": {
+      "type": "string",
+      "default": "O2:O13"
+    },
+    "overlay": {
+      "type": "string",
+      "default": "B2:B13"
+    },
+    "overlays": {
+      "type": "array",
+      "default": [
+        "B2:B13"
+      ]
+    },
+    "barColor": {
+      "type": "string",
+      "default": "#6FCFC0"
+    },
+    "chartType": {
+      "type": "string",
+      "default": "bar"
+    }
+  },
+  "supports": {
+    "html": false
+  }
 }
