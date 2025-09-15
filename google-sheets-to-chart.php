@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Sheets Chart Block
  * Description: Connects to Google Sheets, fetches data, and displays it in a chart.js Gutenberg block.
- * Version: 0.1
+ * Version: 1.0
  * Author: Ben G
  */
 
@@ -41,10 +41,9 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
     $sheet_id = sanitize_text_field($request->get_param('sheetId'));
     $label    = sanitize_text_field($request->get_param('label'));
     $stats    = sanitize_text_field($request->get_param('stats'));
-    //$overlay  = sanitize_text_field($request->get_param('overlay'));
-    
+    $block_id = sanitize_text_field($request->get_param('blockId'));
     $overlays_param = $request->get_param('overlays');
-    error_log( 'overlays (raw): ' . wp_json_encode( $overlays_param ) );
+
 
     if ( is_array( $overlays_param ) ) {
         $overlays = array_values( array_filter( array_map( 'sanitize_text_field', $overlays_param ), 'strlen' ) );
@@ -69,7 +68,7 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
         wp_mkdir_p( $dir );
     }
 
-    $filename = $dir . "{$sheet_id}.json";
+    $filename = $dir . "{$block_id}.json";
 
     // check if file already exists 
     if ( file_exists( $filename ) ) {
@@ -102,15 +101,16 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
 
 add_action('rest_api_init', function () {
     register_rest_route('sheets-chart/v1', '/cached', [
-        'methods' => 'GET',
-        'callback' => 'sheets_chart_fetch_cached_data'
+        'methods'             => 'GET',
+        'callback'            => 'sheets_chart_fetch_cached_data',
+        'permission_callback' => '__return_true',
     ]);
 });
 
 function sheets_chart_fetch_cached_data( WP_REST_Request $req ) {
-    $sheet_id = sanitize_text_field( $req->get_param('sheetId') );
+    $block_id = sanitize_text_field( $req->get_param('blockId') );
     $upload_dir = wp_upload_dir();
-    $file = trailingslashit($upload_dir['basedir']) . 'sheets-cache/' . $sheet_id . '.json';
+    $file = trailingslashit($upload_dir['basedir']) . 'sheets-cache/' . $block_id . '.json';
     if ( ! file_exists($file) ) {
       return new WP_Error('no_cache', 'No cached file', ['status' => 404]);
     }

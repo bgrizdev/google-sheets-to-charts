@@ -4,30 +4,33 @@ import { TabPanel, TextControl, Button, Tooltip, ColorPicker, RadioControl } fro
 import { createElement, useState, useRef, useEffect } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
 import Chart from 'chart.js/auto';
-//import { color } from 'chart.js/helpers';
+import metadata from './block.json';
+import { toFont } from 'chart.js/helpers';
+import trendlinePlugin from 'chartjs-plugin-trendline';
+Chart.register(trendlinePlugin);
 
-registerBlockType('sheets/chart-block', {
-    title: 'Sheets Chart Block',
-    icon: 'chart-bar',
-    category: 'widgets',
+registerBlockType(metadata, {
 
-    attributes: {
-        sheetId: { type: 'string', default: '' },
-        label: { type: 'string', default: 'A2:A13' },
-        stats: { type: 'string', default: 'O2:O13' },
-        overlay: { type: 'string', default: 'B2:B13' },
-        overlays:{ type: 'array',  default: ['B2:B13'] },
-        barColor:{ type: 'string', default: '#3b82f6' },
-        chartType:{ type: 'string', default: 'bar' },
-    },
 
     edit: ({ attributes, setAttributes }) => {
-        const { sheetId, label, stats, overlay, overlays, barColor, chartType } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId } = attributes;
         const blockProps = useBlockProps();
         const [status, setStatus] = useState('');
         const [previewData, setPreviewData] = useState(null);
         const canvasRef = useRef(null);
         const chartRef = useRef(null);
+
+        // set the blockId once persists after 
+        useEffect(() => {
+            if (!blockId) {
+            const id =
+                (window.crypto?.randomUUID?.() ??
+                (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)))
+                .toLowerCase();
+
+            setAttributes({ blockId: id });
+            }
+        }, [blockId, setAttributes]);
 
         // helper function to normalize data for chart
         // data = { labels: string[], stats: string[], overlays: [{header, values, range}] }
@@ -39,7 +42,7 @@ registerBlockType('sheets/chart-block', {
         // parse numeric stats, stripping symbols like $ or %
         const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
             const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
-            return Number.isFinite(num) ? num : 0;
+            return Number.isFinite(num) ? num.toFixed(1) : "0.0";
         });
 
         // Build one tooltip line per row by joining "Header: Value" for each overlay
@@ -65,7 +68,6 @@ registerBlockType('sheets/chart-block', {
         return { labels, values, overlays };
         };
 
-
         // helper function to create plugin for custom chart labels 
         const circleLabelsPlugin = {
 
@@ -74,7 +76,8 @@ registerBlockType('sheets/chart-block', {
                 const { ctx } = chart;
                 const meta = chart.getDatasetMeta(0);
                 const dataset = chart.data.datasets[0];
-
+                const f = toFont({ family: Chart.defaults.font.family, size: 10, weight: '700' });
+                ctx.font = f.string;    
                 ctx.save();
                 meta.data.forEach((bar, index) => {
                 const value = dataset.data[index];
@@ -105,7 +108,10 @@ registerBlockType('sheets/chart-block', {
         function getChartConfig(type, { labels, values, overlays, colors, barColor }) {
             if (type === 'scatter') {
                 // Scatter expects [{x, y}] points and linear scales
-                const points = values.map((y, i) => ({ x: i, y }));
+                  const points = values.map((y, i) => ({
+                        x: i,              
+                        y: Number(y)     
+                    }));
                 return {
                 type: 'scatter',
                 data: {
@@ -116,6 +122,14 @@ registerBlockType('sheets/chart-block', {
                     backgroundColor: colors,
                     borderColor: barColor,
                     pointRadius: 5,
+                    trendlineLinear: {
+                        // most builds accept "style"; some accept "color" — keep both for safety
+                        style: 'rgba(111, 207, 192, 0.7)',
+                        color: 'rgba(111, 207, 192, 0.7)',
+                        lineStyle: 'solid',     // 'solid' | 'dotted' | 'dashed'
+                        width: 3,
+                        projection: true         // extend line across the whole chart area
+                    }
                     }],
                 },
                 options: {
@@ -179,6 +193,14 @@ registerBlockType('sheets/chart-block', {
                 elements: { categoryPercentage: 1.5 },
                 plugins: {
                     legend: { display: false },
+                    title: {
+                        display: !!title,
+                        text: title,
+                        font: {
+                            size: 20,        
+                            family: 'Montserrat' 
+                        },
+                    },
                     tooltip: overlays.length ? {
                     callbacks: {
                         afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
@@ -216,7 +238,7 @@ registerBlockType('sheets/chart-block', {
                 await apiFetch({
                 path: '/sheets-chart/v1/fetch-data',
                 method: 'POST',
-                data: { sheetId, label, stats, overlays },
+                data: { sheetId, blockId, label, stats, overlays },
                 });
                 setStatus('Data fetched successfully.');
             } catch (err) {
@@ -226,10 +248,12 @@ registerBlockType('sheets/chart-block', {
         };
 
         const loadPreview = async () => {
-            if (!sheetId) return;
+
+            if (!sheetId || !blockId) return;
+
             try {
             const data = await apiFetch({
-                path: `/sheets-chart/v1/cached?sheetId=${encodeURIComponent(sheetId)}`,
+                path: `/sheets-chart/v1/cached?blockId=${encodeURIComponent(blockId)}`,
                 method: 'GET',
             });
 
@@ -273,6 +297,19 @@ registerBlockType('sheets/chart-block', {
             barColor: attributes.barColor || '#3b82f6',
         });
 
+        // set font 
+        async function useMontserrat(blockEl) {
+            // ensure the font is ready (modern browsers)
+            try { await (document.fonts?.load('12px "Montserrat"') || Promise.resolve()); } catch {}
+
+            const color = getComputedStyle(blockEl).color || '#111';
+
+            Chart.defaults.font.family = '"Montserrat", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif';
+            Chart.defaults.font.size   = 14;   // tweak to taste
+            Chart.defaults.font.weight = '400';
+            Chart.defaults.color       = color;
+        }
+
         chartRef.current = new Chart(ctx, cfg);
 
           return () => {
@@ -280,67 +317,6 @@ registerBlockType('sheets/chart-block', {
             chartRef.current = null;
         };
 
-        // OLD BELOW
-        //if (!chartRef.current) {
-        //    // first render: create chart
-        //    const ctx = canvasRef.current.getContext('2d');
-        //    chartRef.current = new Chart(ctx, {
-        //    type: 'bar',
-        //    data: {
-        //        labels,
-        //        datasets: [{
-        //        label: 'Rating',
-        //        data: values,
-        //        backgroundColor: colors,
-        //        borderColor:   attributes.barColor,
-        //        borderRadius: 20,
-        //        borderWidth: 1
-        //        }],
-        //    },
-        //    options: {
-        //        indexAxis: 'y',
-        //        responsive: true,
-        //        maintainAspectRatio: false,
-        //        scales: {
-        //            x: {
-        //                grid: { display: false },
-        //                ticks: { display: false },
-        //            },
-        //            y: {
-        //                grid: { display: false },
-        //                ticks: { color: '#000', font: { size: 14 }},
-        //            },
-        //        },
-        //        elements: {
-        //            categoryPercentage: 1.5
-        //        },
-        //        plugins: {
-        //        tooltip: overlays.length ? {
-        //            callbacks: {
-        //            afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
-        //            }
-        //        } : {},
-        //        legend: {
-        //            display: false
-        //        },
-        //        }
-        //    },
-        //    plugins: [circleLabelsPlugin],
-        //    });
-        //} else {
-        //    // updates: mutate and update
-        //    const chart = chartRef.current;
-        //    chart.data.labels = labels;
-        //    chart.data.datasets[0].data = values;
-        //    chart.data.datasets[0].backgroundColor = attributes.barColor || '#3b82f6';
-        //    chart.data.datasets[0].borderColor     = attributes.barColor || '#3b82f6';
-        //    chart.options.plugins.tooltip = overlays.length ? {
-        //    callbacks: {
-        //        afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
-        //    }
-        //    } : {};
-        //    chart.update();
-        //}
         }, [previewData, attributes.barColor, attributes.chartType]); 
 
         // loads the preview up  
@@ -415,9 +391,25 @@ registerBlockType('sheets/chart-block', {
             }
 
             // --- DATA TAB ---
-            return createElement(
+            return  createElement(
                 'div',
                 { style: { marginTop: '1rem' } },
+                createElement(TextControl, {
+                label: 'Title',
+                value: title,
+                onChange: (value) => setAttributes({ title: value }),
+                help: 'Add a chart title'
+                }),
+                createElement(RadioControl, {
+                label: 'Chart Type',
+                selected: chartType,
+                options: [
+                    { label: 'Bar', value: 'bar' },
+                    { label: 'Scatter', value: 'scatter' },
+                ],
+                onChange: (selected) => setAttributes({ chartType: selected }), 
+                help: 'Select the bar type to use.'
+                }),
                 createElement(TextControl, {
                 label: 'Google Sheet ID',
                 value: sheetId,
@@ -451,16 +443,6 @@ registerBlockType('sheets/chart-block', {
                     )
                 ),
                 createElement(Button, { variant:'primary', onClick: addOverlay, style:{ marginTop:'8px' } }, 'Add overlay'),
-                createElement(RadioControl, {
-                    label: 'Chart Type',
-                    selected: chartType,
-                    options: [
-                        { label: 'Bar', value: 'bar' },
-                        { label: 'Scatter', value: 'scatter' },
-                    ],
-                    onChange: (selected) => setAttributes({ chartType: selected }), 
-                    help: 'Select the bar type to use.'
-                }),
 
                 // Buttons row
                 createElement(
@@ -501,13 +483,16 @@ registerBlockType('sheets/chart-block', {
 
     },
     save: ({ attributes }) => {
-    const { sheetId, label, stats, overlay, overlays = [], barColor, chartType } = attributes;
+    const { title, sheetId, label, stats, overlay, overlays = [], barColor, chartType, blockId } = attributes;
     const overlaysToSave = overlays.length ? overlays : (overlay ? [overlay] : []);
 
     return createElement(
         'div',
         {
         className: 'sheets-chart-block',
+        'data-block-id': blockId,
+        'data-chart-type': chartType,
+        'data-sheet-title': title,
         'data-sheet-id': sheetId,
         'data-label': label,
         'data-stats': stats,

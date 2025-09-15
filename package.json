@@ -1,10 +1,19 @@
 {
-  "name": "google-sheets-to-charts",
+  "name": "google-sheets-to-chart",
   "version": "1.0.0",
   "main": "index.js",
+  "files": [
+    "build",
+    "includes",
+    "vendor",
+    "package.json",
+    "composer.json",
+    "google-sheets-to-chart.php"
+  ],
   "scripts": {
     "build": "wp-scripts build src/index.js src/frontend.js",
-    "start": "wp-scripts start"
+    "start": "wp-scripts start",
+    "zip": "wp-scripts plugin-zip"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +23,7 @@
     "@wordpress/scripts": "^30.19.0"
   },
   "dependencies": {
-    "chart.js": "^4.5.0"
+    "chart.js": "^4.5.0",
+    "chartjs-plugin-trendline": "^3.1.1"
   }
 }
