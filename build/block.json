@@ -44,6 +44,14 @@
     "chartType": {
       "type": "string",
       "default": "bar"
+    },
+    "xAxisLabel": {
+      "type": "string",
+      "default": ""
+    },
+    "yAxisLabel": {
+      "type": "string",
+      "default": ""
     }
   },
   "supports": {
