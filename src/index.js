@@ -14,7 +14,7 @@ registerBlockType(metadata, {
 
 
     edit: ({ attributes, setAttributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel } = attributes;
         const blockProps = useBlockProps();
         const [status, setStatus] = useState('');
         const [previewData, setPreviewData] = useState(null);
@@ -124,12 +124,17 @@ registerBlockType(metadata, {
                             borderColor: barColor,
                             pointRadius: 5,
                             trendlineLinear: {
-                                // most builds accept "style"; some accept "color" — keep both for safety
                                 style: 'rgba(111, 207, 192, 0.7)',
                                 color: 'rgba(111, 207, 192, 0.7)',
-                                lineStyle: 'solid',     // 'solid' | 'dotted' | 'dashed'
+                                lineStyle: 'solid',
                                 width: 3,
-                                projection: true         // extend line across the whole chart area
+                                projection: true,
+                                label: {
+                                    text: attributes.trendlineLabel || "Trendline",
+                                    display: true,
+                                    displayValue: false,
+                                    offset: 15,
+                                }
                             }
                         }],
                     },
@@ -345,7 +350,7 @@ registerBlockType(metadata, {
                 chartRef.current = null;
             };
 
-        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel]);
+        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel, attributes.trendlineLabel]);
 
         // loads the preview up  
         useEffect(() => {
@@ -435,7 +440,7 @@ registerBlockType(metadata, {
                                         { label: 'Scatter', value: 'scatter' },
                                     ],
                                     onChange: (selected) => setAttributes({ chartType: selected }),
-                                    help: 'Select the bar type to use.'
+                                    help: 'Select the chart type to use.'
                                 }),
                                 createElement(TextControl, {
                                     label: 'Google Sheet ID',
@@ -457,7 +462,7 @@ registerBlockType(metadata, {
                                     onChange: (value) => setAttributes({ stats: value }),
                                     help: 'Enter the range of stats you want to display, e.g., O2:O13'
                                 }),
-                                
+
                                 // Conditional axis label inputs for scatter plots
                                 chartType === 'scatter' && createElement(
                                     'div',
@@ -476,6 +481,13 @@ registerBlockType(metadata, {
                                         placeholder: 'e.g., Rating, Score, Value',
                                         onChange: (value) => setAttributes({ yAxisLabel: value }),
                                         help: 'Label for the vertical (Y) axis'
+                                    }),
+                                    createElement(TextControl, {
+                                        label: 'Trendline Label',
+                                        value: trendlineLabel || '',
+                                        placeholder: 'e.g., Trend, Linear Trend, Best Fit',
+                                        onChange: (value) => setAttributes({ trendlineLabel: value }),
+                                        help: 'Label that appears when hovering over the trendline'
                                     })
                                 ),
 
@@ -532,7 +544,7 @@ registerBlockType(metadata, {
 
     },
     save: ({ attributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays = [], barColor, chartType, blockId, xAxisLabel, yAxisLabel } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays = [], barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel } = attributes;
         const overlaysToSave = overlays.length ? overlays : (overlay ? [overlay] : []);
 
         return createElement(
@@ -549,7 +561,8 @@ registerBlockType(metadata, {
                 'data-overlays': JSON.stringify(overlaysToSave),
                 'data-bar-color': barColor || '#3b82f6',
                 'data-x-axis-label': xAxisLabel ?? '',
-                'data-y-axis-label': yAxisLabel ?? ''
+                'data-y-axis-label': yAxisLabel ?? '',
+                'data-trendline-label': trendlineLabel ?? ''
             },
             createElement('div', { className: 'sheets-chart-canvas-wrap', style: { height: '420px', maxWidth: '800px' } },
                 createElement('canvas', { className: 'sheets-chart-canvas' })
