@@ -11,28 +11,28 @@ const normalizeForChart = (data) => {
 
   // parse numeric stats, stripping symbols like $ or %
   const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
-      const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
-      return Number.isFinite(num) ? num.toFixed(1) : "0.0";
+    const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
+    return Number.isFinite(num) ? num.toFixed(1) : "0.0";
   });
 
   // Build one tooltip line per row by joining "Header: Value" for each overlay
   const overlayDefs = Array.isArray(data.overlays) ? data.overlays : [];
   const rowCount = Math.max(
-      labels.length,
-      values.length,
-      ...overlayDefs.map(o => (o?.values?.length ?? 0))
+    labels.length,
+    values.length,
+    ...overlayDefs.map(o => (o?.values?.length ?? 0))
   );
 
   const overlays = Array.from({ length: rowCount }, (_, i) => {
-      const parts = [];
-      for (const o of overlayDefs) {
+    const parts = [];
+    for (const o of overlayDefs) {
       const v = o?.values?.[i];
       if (v !== undefined && v !== null && String(v) !== '') {
-          const h = o?.header ? `${o.header}: ` : '';
-          parts.push(`${h}${v}`);
+        const h = o?.header ? `${o.header}: ` : '';
+        parts.push(`${h}${v}`);
       }
-      }
-      return parts.join(' • '); // what your tooltip reads via overlays[ctx.dataIndex]
+    }
+    return parts.join(' • '); // what your tooltip reads via overlays[ctx.dataIndex]
   });
 
   return { labels, values, overlays };
@@ -45,45 +45,45 @@ function addAlphaToHex(baseColor, alpha) {
   return `#${fullHex}${alphaHex}`;
 }
 
-  const circleLabelsPlugin = {
-    id: 'circleLabels',
-    afterDatasetsDraw(chart) {
-      const { ctx } = chart;
-      const meta = chart.getDatasetMeta(0);
-      const dataset = chart.data.datasets[0];
+const circleLabelsPlugin = {
+  id: 'circleLabels',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    const meta = chart.getDatasetMeta(0);
+    const dataset = chart.data.datasets[0];
 
-      ctx.save();
-      const f = toFont({ family: Chart.defaults.font.family, size: 10, weight: '700' });
-      ctx.font = f.string;    
-      meta.data.forEach((bar, index) => {
-        const value = dataset.data[index];
-        const x = bar.x - 10;
-        const y = bar.y;
+    ctx.save();
+    const f = toFont({ family: Chart.defaults.font.family, size: 10, weight: '700' });
+    ctx.font = f.string;
+    meta.data.forEach((bar, index) => {
+      const value = dataset.data[index];
+      const x = bar.x - 10;
+      const y = bar.y;
 
-        ctx.beginPath();
-        ctx.arc(x, y, 10, 0, 2 * Math.PI);
-        ctx.fillStyle = '#fff';
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = dataset.backgroundColor?.[index] || dataset.backgroundColor;
-        ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, 10, 0, 2 * Math.PI);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = dataset.backgroundColor?.[index] || dataset.backgroundColor;
+      ctx.stroke();
 
-        ctx.fillStyle = '#000';
-        ctx.font = 'bold 10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(value, x, y);
-      });
-      ctx.restore();
-    }
-  };
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(value, x, y);
+    });
+    ctx.restore();
+  }
+};
 
 // BAR CONFIG
 function getBarConfig({ labels, values, overlays, colors, barColor, title }) {
 
   const yValues = (Array.isArray(values) ? values : []).map((raw) => {
-      const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
-      return Number.isFinite(num) ? num.toFixed(1) : "0.0";
+    const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
+    return Number.isFinite(num) ? num.toFixed(1) : "0.0";
   });
 
   return {
@@ -97,7 +97,7 @@ function getBarConfig({ labels, values, overlays, colors, barColor, title }) {
         borderColor: barColor,
         borderWidth: 1,
         borderRadius: 20,
-        categoryPercentage: 0.9, 
+        categoryPercentage: 0.9,
         barPercentage: 0.9
       }],
     },
@@ -129,16 +129,17 @@ function getBarConfig({ labels, values, overlays, colors, barColor, title }) {
 
 // SCATTER CONFIG
 
-function getScatterConfig({ labels, yValues, overlays, colors, barColor, title }) {
+function getScatterConfig({ labels, yValues, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel }) {
   const points = yValues.map((y, i) => ({ x: i, y })); // x = index; label via tick callback
 
   return {
     type: 'scatter',
     data: {
       datasets: [{
-        label: 'Better Value',
+        label: 'Rating',
         data: points,
         backgroundColor: colors,
+        borderColor: barColor,
         borderWidth: 0,
         pointRadius: 5,
         // trendline plugin
@@ -147,7 +148,13 @@ function getScatterConfig({ labels, yValues, overlays, colors, barColor, title }
           style: 'rgba(111,207,192,0.7)',
           lineStyle: 'solid',
           width: 3,
-          projection: true
+          projection: true,
+          label: {
+            text: trendlineLabel || "Trendline",
+            display: true,
+            displayValue: false,
+            offset: 15,
+          }
         }
       }]
     },
@@ -158,6 +165,11 @@ function getScatterConfig({ labels, yValues, overlays, colors, barColor, title }
       scales: {
         x: {
           type: 'linear',
+          title: {
+            display: !!xAxisLabel,
+            text: xAxisLabel || '',
+            font: { size: 14 }
+          },
           grid: { display: false },
           ticks: {
             // map index → label
@@ -165,7 +177,12 @@ function getScatterConfig({ labels, yValues, overlays, colors, barColor, title }
           }
         },
         y: {
-          grid: { display: true },
+          title: {
+            display: !!yAxisLabel,
+            text: yAxisLabel || '',
+            font: { size: 14 }
+          },
+          grid: { display: false },
           ticks: { color: '#000', font: { size: 14 } }
         }
       },
@@ -181,14 +198,15 @@ function getScatterConfig({ labels, yValues, overlays, colors, barColor, title }
             label: (ctx) => {
               const i = ctx.dataIndex;
               const name = labels[i] ?? `#${i + 1}`;
-              const val  = ctx.parsed?.y ?? '';
+              const val = ctx.parsed?.y ?? '';
               const extra = overlays[i] ? ` ${overlays[i]}` : '';
               return `${name}: ${val}${extra}`;
             }
           }
         } : {}
       }
-    }
+    },
+    plugins: [], // no circleLabelsPlugin on scatter
   };
 }
 
@@ -205,14 +223,17 @@ async function getCachedData(blockId) {
 
 // --- render one block ---------------------------------
 async function renderBlock(blockEl) {
-  const title    = blockEl.dataset.sheetTitle || '';
-  const blockId  = blockEl.dataset.blockId || '';
+  const title = blockEl.dataset.sheetTitle || '';
+  const blockId = blockEl.dataset.blockId || '';
   const chartType = blockEl.dataset.chartType || 'bar';
   //const sheetId  = blockEl.dataset.sheetId || '';
   //const label    = blockEl.dataset.label || '';
   //const stats    = blockEl.dataset.stats || '';
   //const overlay  = blockEl.dataset.overlay || '';
   const barColor = blockEl.dataset.barColor || '#3b82f6';
+  const xAxisLabel = blockEl.dataset.xAxisLabel || '';
+  const yAxisLabel = blockEl.dataset.yAxisLabel || '';
+  const trendlineLabel = blockEl.dataset.trendlineLabel || '';
 
   const canvas = blockEl.querySelector('canvas.sheets-chart-canvas');
   if (!canvas) return;
@@ -242,22 +263,22 @@ async function renderBlock(blockEl) {
     // helper function
     async function useMontserrat(blockEl) {
       // ensure the font is ready (modern browsers)
-      try { await (document.fonts?.load('12px "Montserrat"') || Promise.resolve()); } catch {}
+      try { await (document.fonts?.load('12px "Montserrat"') || Promise.resolve()); } catch { }
 
       const color = getComputedStyle(blockEl).color || '#111';
 
       Chart.defaults.font.family = '"Montserrat", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif';
-      Chart.defaults.font.size   = 14;   
+      Chart.defaults.font.size = 14;
       Chart.defaults.font.weight = '400';
-      Chart.defaults.color       = color;
+      Chart.defaults.color = color;
     }
 
-    await useMontserrat(blockEl); 
+    await useMontserrat(blockEl);
 
     const ctx = canvas.getContext('2d');
 
     const config = (chartType === 'scatter')
-      ? getScatterConfig({ labels, yValues, overlays, colors, barColor, title })
+      ? getScatterConfig({ labels, yValues, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel })
       : getBarConfig({ labels, values, overlays, colors, barColor, title });
 
     const chart = new Chart(ctx, config);

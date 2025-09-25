@@ -16,7 +16,10 @@
     "overlay":  { "type": "string", "default": "B2:B13" },
     "overlays": { "type": "array",  "default": ["B2:B13"] },
     "barColor": { "type": "string", "default": "#6FCFC0" },
-    "chartType":{"type": "string", "default": "bar" }
+    "chartType":{"type": "string", "default": "bar" },
+    "xAxisLabel": { "type": "string", "default": "" },
+    "yAxisLabel": { "type": "string", "default": "" },
+    "trendlineLabel": { "type": "string", "default": "" }
   },
   "supports": { "html": false }
 }
