@@ -40,11 +40,15 @@ registerBlockType(metadata, {
 
             const labels = Array.isArray(data.labels) ? data.labels.map(String) : [];
 
+            console.log('LABELS ' + labels);
+
             // parse numeric stats, stripping symbols like $ or %
             const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
                 const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
                 return Number.isFinite(num) ? num.toFixed(1) : "0.0";
             });
+
+            console.log('VALUES ' + values);
 
             // Build one tooltip line per row by joining "Header: Value" for each overlay
             const overlayDefs = Array.isArray(data.overlays) ? data.overlays : [];
