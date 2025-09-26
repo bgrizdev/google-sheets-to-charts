@@ -112,93 +112,91 @@ registerBlockType(metadata, {
         // helper for chartType config settings
         function getChartConfig(type, { labels, values, overlays, colors, barColor }) {
             if (type === 'scatter') {
+            // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
+            const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
+            const xs = labels.map(toNum);
+            const ys = values.map((v) => Number(v));
 
-                // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
-                const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
-                const xs = labels.map(toNum);
-                const ys = values.map((v) => Number(v));
+            // 2) Points with original label for tooltip
+            const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '' }));
 
-                // 2) Build scatter points (stash the original label for the tooltip)
-                const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '' }));
+            // detect if prices are all non-negative
+            const nonNegativeX = xs.every(n => n >= 0);
 
-                // 3) Make "nice" ticks (about 6 across)
-                const niceStep = (raw) => {
-                    const pow = 10 ** Math.floor(Math.log10(raw));
-                    const n = raw / pow;
-                    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow;
-                };
-                const niceRange = (min, max, count = 6) => {
-                    const span = Math.max(1, max - min);
-                    const step = niceStep(span / (count - 1));
-                    return {
-                        min: Math.floor(min / step) * step,
-                        max: Math.ceil(max / step) * step,
-                        step,
-                    };
-                };
-
-                const { min: xMin, max: xMax, step: xStep } = niceRange(Math.min(...xs), Math.max(...xs), 6);
-                const { min: yMin, max: yMax, step: yStep } = niceRange(Math.min(...ys), Math.max(...ys), 6);
-
-                return {
+            return {
                 type: 'scatter',
                 data: {
-                    datasets: [{
+                datasets: [{
                     label: 'Rating',
                     data: points,
                     backgroundColor: colors,
                     borderColor: barColor,
                     pointRadius: 5,
-                    trendlineLinear: { /* your trendline settings */ },
-                    }],
+                    trendlineLinear: {
+                    style: 'rgba(111, 207, 192, 0.7)',
+                    color: 'rgba(111, 207, 192, 0.7)',
+                    lineStyle: 'solid',
+                    width: 3,
+                    projection: true,
+                    label: {
+                        text: attributes.trendlineLabel || 'Trendline',
+                        display: true,
+                        displayValue: false,
+                        offset: 15,
+                    }
+                    }
+                }],
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
                     x: {
-                        type: 'linear',
-                        min: xMin,
-                        max: xMax,
-                        ticks: {
-                        stepSize: xStep,
-                        // format as currency (adjust to your locale as needed)
+                    type: 'linear',
+                    beginAtZero: nonNegativeX, // keeps prices from going negative
+                    grace: '5%',               // built-in padding
+                    ticks: {
+                        // keep the axis readable (about 6 ticks)
+                        maxTicksLimit: 6,
                         callback: (v) => `$${v}`,
-                        },
-                        grid: { display: false },
-                        title: {
+                    },
+                    grid: { display: false },
+                    title: {
                         display: !!attributes.xAxisLabel,
                         text: attributes.xAxisLabel || '',
                         font: { size: 14 },
-                        },
+                    },
                     },
                     y: {
-                        min: yMin,
-                        max: yMax,
-                        ticks: { stepSize: yStep, font: { size: 14 } },
-                        grid: { display: false },
-                        title: {
+                    grace: '5%',               // built-in padding
+                    ticks: {
+                        maxTicksLimit: 6,
+                        font: { size: 14 },
+                    },
+                    grid: { display: false },
+                    title: {
                         display: !!attributes.yAxisLabel,
                         text: attributes.yAxisLabel || '',
                         font: { size: 14 },
-                        },
                     },
                     },
-                    plugins: {
+                },
+                plugins: {
                     legend: { display: false },
                     tooltip: {
-                        callbacks: {
+                    callbacks: {
                         label: (ctx) => {
-                            const p = ctx.raw;
-                            return `${p.origLabel || `$${ctx.parsed.x}`}: ${ctx.parsed.y}`;
-                        },
+                        const p = ctx.raw;
+                        return `${p.origLabel || `$${ctx.parsed.x}`}: ${ctx.parsed.y}`;
                         },
                     },
                     },
                 },
+                },
                 plugins: [],
-                };
+            };
             }
+
 
             // default: bar
             return {
