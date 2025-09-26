@@ -19,7 +19,9 @@
     "chartType":{"type": "string", "default": "bar" },
     "xAxisLabel": { "type": "string", "default": "" },
     "yAxisLabel": { "type": "string", "default": "" },
-    "trendlineLabel": { "type": "string", "default": "" }
+    "trendlineLabel": { "type": "string", "default": "" },
+    "xAxisData": { "type": "string", "default": "" },
+    "yAxisData": { "type": "string", "default": "" }
   },
   "supports": { "html": false }
 }

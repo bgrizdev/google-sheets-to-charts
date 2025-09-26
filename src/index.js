@@ -14,7 +14,7 @@ registerBlockType(metadata, {
 
 
     edit: ({ attributes, setAttributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData } = attributes;
         const blockProps = useBlockProps();
         const [status, setStatus] = useState('');
         const [previewData, setPreviewData] = useState(null);
@@ -112,79 +112,91 @@ registerBlockType(metadata, {
         // helper for chartType config settings
         function getChartConfig(type, { labels, values, overlays, colors, barColor }) {
             if (type === 'scatter') {
-                // Scatter expects [{x, y}] points and linear scales
-                const points = values.map((y, i) => ({
-                    x: i,
-                    y: Number(y)
-                }));
+
+                // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
+                const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
+                const xs = labels.map(toNum);
+                const ys = values.map((v) => Number(v));
+
+                // 2) Build scatter points (stash the original label for the tooltip)
+                const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '' }));
+
+                // 3) Make "nice" ticks (about 6 across)
+                const niceStep = (raw) => {
+                    const pow = 10 ** Math.floor(Math.log10(raw));
+                    const n = raw / pow;
+                    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow;
+                };
+                const niceRange = (min, max, count = 6) => {
+                    const span = Math.max(1, max - min);
+                    const step = niceStep(span / (count - 1));
+                    return {
+                        min: Math.floor(min / step) * step,
+                        max: Math.ceil(max / step) * step,
+                        step,
+                    };
+                };
+
+                const { min: xMin, max: xMax, step: xStep } = niceRange(Math.min(...xs), Math.max(...xs), 6);
+                const { min: yMin, max: yMax, step: yStep } = niceRange(Math.min(...ys), Math.max(...ys), 6);
+
                 return {
-                    type: 'scatter',
-                    data: {
-                        // labels are optional for scatter; we’ll show them in tooltip
-                        datasets: [{
-                            label: 'Rating',
-                            data: points,
-                            backgroundColor: colors,
-                            borderColor: barColor,
-                            pointRadius: 5,
-                            trendlineLinear: {
-                                style: 'rgba(111, 207, 192, 0.7)',
-                                color: 'rgba(111, 207, 192, 0.7)',
-                                lineStyle: 'solid',
-                                width: 3,
-                                projection: true,
-                                label: {
-                                    text: attributes.trendlineLabel || "Trendline",
-                                    display: true,
-                                    displayValue: false,
-                                    offset: 15,
-                                }
-                            }
-                        }],
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        scales: {
-                            x: {
-                                type: 'linear',
-                                title: {
-                                    display: !!attributes.xAxisLabel,
-                                    text: attributes.xAxisLabel || '',
-                                    font: { size: 14 }
-                                },
-                                ticks: {
-                                    // show original labels for indices
-                                    callback: (value) => labels[value] ?? value,
-                                },
-                                grid: { display: false },
-                            },
-                            y: {
-                                title: {
-                                    display: !!attributes.yAxisLabel,
-                                    text: attributes.yAxisLabel || '',
-                                    font: { size: 14 }
-                                },
-                                grid: { display: false },
-                                ticks: { color: '#000', font: { size: 14 } },
-                            },
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                    label: 'Rating',
+                    data: points,
+                    backgroundColor: colors,
+                    borderColor: barColor,
+                    pointRadius: 5,
+                    trendlineLinear: { /* your trendline settings */ },
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                    x: {
+                        type: 'linear',
+                        min: xMin,
+                        max: xMax,
+                        ticks: {
+                        stepSize: xStep,
+                        // format as currency (adjust to your locale as needed)
+                        callback: (v) => `$${v}`,
                         },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: overlays.length ? {
-                                callbacks: {
-                                    label: (ctx) => {
-                                        const i = ctx.dataIndex;
-                                        const name = labels[i] ?? `#${i + 1}`;
-                                        const val = ctx.parsed?.y ?? '';
-                                        const extra = overlays[i] ? ` ${overlays[i]}` : '';
-                                        return `${name}: ${val}${extra}`;
-                                    },
-                                },
-                            } : {},
+                        grid: { display: false },
+                        title: {
+                        display: !!attributes.xAxisLabel,
+                        text: attributes.xAxisLabel || '',
+                        font: { size: 14 },
                         },
                     },
-                    plugins: [], // no circleLabelsPlugin on scatter
+                    y: {
+                        min: yMin,
+                        max: yMax,
+                        ticks: { stepSize: yStep, font: { size: 14 } },
+                        grid: { display: false },
+                        title: {
+                        display: !!attributes.yAxisLabel,
+                        text: attributes.yAxisLabel || '',
+                        font: { size: 14 },
+                        },
+                    },
+                    },
+                    plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                        label: (ctx) => {
+                            const p = ctx.raw;
+                            return `${p.origLabel || `$${ctx.parsed.x}`}: ${ctx.parsed.y}`;
+                        },
+                        },
+                    },
+                    },
+                },
+                plugins: [],
                 };
             }
 
@@ -452,20 +464,48 @@ registerBlockType(metadata, {
                                     onChange: (value) => setAttributes({ sheetId: value }),
                                     help: 'Paste the ID from the Google Sheet URL'
                                 }),
-                                createElement(TextControl, {
-                                    label: 'Label Range',
-                                    value: label,
-                                    placeholder: 'A2:A13',
-                                    onChange: (value) => setAttributes({ label: value }),
-                                    help: 'Enter the range of labels you want to display, e.g., A2:A13'
-                                }),
-                                createElement(TextControl, {
-                                    label: 'Stat Range',
-                                    value: stats,
-                                    placeholder: 'O2:O13',
-                                    onChange: (value) => setAttributes({ stats: value }),
-                                    help: 'Enter the range of stats you want to display, e.g., O2:O13'
-                                }),
+
+                                // Conditional data inputs for bar charts
+                                chartType === 'bar' && createElement(
+                                    'div',
+                                    { style: { marginTop: '1rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px' } },
+                                    createElement('h4', { style: { margin: '0 0 0.5rem 0', fontSize: '14px', fontWeight: '600' } }, 'Bar Chart Data'),
+                                    createElement(TextControl, {
+                                        label: 'Label Range',
+                                        value: label,
+                                        placeholder: 'A2:A13',
+                                        onChange: (value) => setAttributes({ label: value }),
+                                        help: 'Enter the range of labels you want to display, e.g., A2:A13'
+                                    }),
+                                    createElement(TextControl, {
+                                        label: 'Stat Range',
+                                        value: stats,
+                                        placeholder: 'O2:O13',
+                                        onChange: (value) => setAttributes({ stats: value }),
+                                        help: 'Enter the range of stats you want to display, e.g., O2:O13'
+                                    })
+                                ),
+
+                                // Conditional data inputs for scatter charts
+                                chartType === 'scatter' && createElement(
+                                    'div',
+                                    { style: { marginTop: '1rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px' } },
+                                    createElement('h4', { style: { margin: '0 0 0.5rem 0', fontSize: '14px', fontWeight: '600' } }, 'Scatter Plot Data'),
+                                    createElement(TextControl, {
+                                        label: 'X-Axis Data Range',
+                                        value: xAxisData || '',
+                                        placeholder: 'A2:A13',
+                                        onChange: (value) => setAttributes({ xAxisData: value }),
+                                        help: 'Enter the range for X-axis data, e.g., A2:A13'
+                                    }),
+                                    createElement(TextControl, {
+                                        label: 'Y-Axis Data Range',
+                                        value: yAxisData || '',
+                                        placeholder: 'B2:B13',
+                                        onChange: (value) => setAttributes({ yAxisData: value }),
+                                        help: 'Enter the range for Y-axis data, e.g., B2:B13'
+                                    })
+                                ),
 
                                 // Conditional axis label inputs for scatter plots
                                 chartType === 'scatter' && createElement(
@@ -548,7 +588,7 @@ registerBlockType(metadata, {
 
     },
     save: ({ attributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays = [], barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays = [], barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData } = attributes;
         const overlaysToSave = overlays.length ? overlays : (overlay ? [overlay] : []);
 
         return createElement(
@@ -566,7 +606,9 @@ registerBlockType(metadata, {
                 'data-bar-color': barColor || '#3b82f6',
                 'data-x-axis-label': xAxisLabel ?? '',
                 'data-y-axis-label': yAxisLabel ?? '',
-                'data-trendline-label': trendlineLabel ?? ''
+                'data-trendline-label': trendlineLabel ?? '',
+                'data-x-axis-data': xAxisData ?? '',
+                'data-y-axis-data': yAxisData ?? ''
             },
             createElement('div', { className: 'sheets-chart-canvas-wrap', style: { height: '420px', maxWidth: '800px' } },
                 createElement('canvas', { className: 'sheets-chart-canvas' })
