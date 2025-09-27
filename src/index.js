@@ -11,8 +11,6 @@ Chart.register(trendlinePlugin);
 
 registerBlockType(metadata, {
 
-
-
     edit: ({ attributes, setAttributes }) => {
         const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData } = attributes;
         const blockProps = useBlockProps();
@@ -40,15 +38,11 @@ registerBlockType(metadata, {
 
             const labels = Array.isArray(data.labels) ? data.labels.map(String) : [];
 
-            console.log('LABELS ' + labels);
-
             // parse numeric stats, stripping symbols like $ or %
             const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
                 const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
                 return Number.isFinite(num) ? num.toFixed(1) : "0.0";
             });
-
-            console.log('VALUES ' + values);
 
             // Build one tooltip line per row by joining "Header: Value" for each overlay
             const overlayDefs = Array.isArray(data.overlays) ? data.overlays : [];
@@ -183,13 +177,20 @@ registerBlockType(metadata, {
                 },
                 plugins: {
                     legend: { display: false },
-                    tooltip: {
-                    callbacks: {
-                        label: (ctx) => {
-                        const p = ctx.raw;
-                        return `${p.origLabel || `$${ctx.parsed.x}`}: ${ctx.parsed.y}`;
+                    tooltip: overlays.length ? {
+                        callbacks: {
+                            label: (ctx) => {
+                                const i = ctx.dataIndex;
+                                return overlays[i] || '';
+                            },
                         },
-                    },
+                    } : {
+                        callbacks: {
+                            label: (ctx) => {
+                                const p = ctx.raw;
+                                return `${p.origLabel || `${ctx.parsed.x}`}: ${ctx.parsed.y}`;
+                            },
+                        },
                     },
                 },
                 },
@@ -263,10 +264,15 @@ registerBlockType(metadata, {
 
             setStatus('Fetching...');
             try {
+                // Use different data ranges based on chart type
+                const dataToSend = chartType === 'scatter' 
+                    ? { sheetId, blockId, label: xAxisData, stats: yAxisData, overlays }
+                    : { sheetId, blockId, label, stats, overlays };
+                    
                 await apiFetch({
                     path: '/sheets-chart/v1/fetch-data',
                     method: 'POST',
-                    data: { sheetId, blockId, label, stats, overlays },
+                    data: dataToSend,
                 });
                 setStatus('Data fetched successfully.');
             } catch (err) {
@@ -279,10 +285,15 @@ registerBlockType(metadata, {
 
             setStatus('Refreshing...');
             try {
+                // Use different data ranges based on chart type
+                const dataToSend = chartType === 'scatter' 
+                    ? { sheetId, blockId, label: xAxisData, stats: yAxisData, overlays }
+                    : { sheetId, blockId, label, stats, overlays };
+                    
                 await apiFetch({
                     path: '/sheets-chart/v1/refresh-fetch-data',
                     method: 'POST',
-                    data: { sheetId, blockId, label, stats, overlays },
+                    data: dataToSend,
                 });
                 setStatus('Data refreshed successfully.');
                 // Reload the preview to get the fresh data
@@ -369,7 +380,7 @@ registerBlockType(metadata, {
         // loads the preview up  
         useEffect(() => {
             loadPreview();
-        }, [sheetId, label, stats, overlay, blockId]);
+        }, [sheetId, label, stats, overlay, blockId, xAxisData, yAxisData]);
 
         // repeater style fields for overlay controls 
 
