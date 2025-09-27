@@ -38,6 +38,50 @@ const normalizeForChart = (data) => {
   return { labels, values, overlays };
 };
 
+// helper function to sort data for bar charts
+const sortChartData = (labels, values, overlays, sortOrder) => {
+  if (!sortOrder || sortOrder === 'default') {
+    return { labels, values, overlays };
+  }
+
+  // Create array of indices with data for sorting
+  const dataWithIndices = labels.map((label, i) => ({
+    index: i,
+    label,
+    value: Number(values[i]),
+    overlay: overlays[i]
+  }));
+
+  // Sort based on sortOrder
+  switch (sortOrder) {
+    case 'alphabetical-asc':
+      dataWithIndices.sort((a, b) => a.label.localeCompare(b.label));
+      break;
+    case 'alphabetical-desc':
+      dataWithIndices.sort((a, b) => b.label.localeCompare(a.label));
+      break;
+    case 'value-high-low':
+      dataWithIndices.sort((a, b) => b.value - a.value);
+      break;
+    case 'value-low-high':
+      dataWithIndices.sort((a, b) => a.value - b.value);
+      break;
+    default:
+      return { labels, values, overlays };
+  }
+
+  // Extract sorted data
+  const sortedLabels = dataWithIndices.map(item => item.label);
+  const sortedValues = dataWithIndices.map(item => values[item.index]);
+  const sortedOverlays = dataWithIndices.map(item => item.overlay);
+
+  return { 
+    labels: sortedLabels, 
+    values: sortedValues, 
+    overlays: sortedOverlays 
+  };
+};
+
 function addAlphaToHex(baseColor, alpha) {
   const hex = baseColor.replace('#', '');
   const fullHex = hex.length === 3 ? hex.split('').map(x => x + x).join('') : hex;
@@ -129,8 +173,17 @@ function getBarConfig({ labels, values, overlays, colors, barColor, title }) {
 
 // SCATTER CONFIG
 
-function getScatterConfig({ labels, yValues, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel }) {
-  const points = yValues.map((y, i) => ({ x: i, y })); // x = index; label via tick callback
+function getScatterConfig({ labels, values, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel }) {
+  // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
+  const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
+  const xs = labels.map(toNum);
+  const ys = values.map((v) => Number(v));
+
+  // 2) Points with original label for tooltip
+  const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '' }));
+
+  // detect if prices are all non-negative
+  const nonNegativeX = xs.every(n => n >= 0);
 
   return {
     type: 'scatter',
@@ -140,51 +193,55 @@ function getScatterConfig({ labels, yValues, overlays, colors, barColor, title, 
         data: points,
         backgroundColor: colors,
         borderColor: barColor,
-        borderWidth: 0,
         pointRadius: 5,
-        // trendline plugin
         trendlineLinear: {
-          color: 'rgba(111,207,192,0.7)',
-          style: 'rgba(111,207,192,0.7)',
+          style: 'rgba(111, 207, 192, 0.7)',
+          color: 'rgba(111, 207, 192, 0.7)',
           lineStyle: 'solid',
           width: 3,
           projection: true,
           label: {
-            text: trendlineLabel || "Trendline",
+            text: trendlineLabel || 'Trendline',
             display: true,
             displayValue: false,
             offset: 15,
           }
         }
-      }]
+      }],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      parsing: { xAxisKey: 'x', yAxisKey: 'y' },
       scales: {
         x: {
           type: 'linear',
+          beginAtZero: nonNegativeX, // keeps prices from going negative
+          grace: '5%',               // built-in padding
+          ticks: {
+            // keep the axis readable (about 6 ticks)
+            maxTicksLimit: 6,
+            callback: (v) => `${v}`,
+          },
+          grid: { display: false },
           title: {
             display: !!xAxisLabel,
             text: xAxisLabel || '',
-            font: { size: 14 }
+            font: { size: 14 },
           },
-          grid: { display: false },
-          ticks: {
-            // map index → label
-            callback: (value) => labels[value] ?? value
-          }
         },
         y: {
+          grace: '5%',               // built-in padding
+          ticks: {
+            maxTicksLimit: 6,
+            font: { size: 14 },
+          },
+          grid: { display: false },
           title: {
             display: !!yAxisLabel,
             text: yAxisLabel || '',
-            font: { size: 14 }
+            font: { size: 14 },
           },
-          grid: { display: false },
-          ticks: { color: '#000', font: { size: 14 } }
-        }
+        },
       },
       plugins: {
         legend: { display: false },
@@ -197,16 +254,20 @@ function getScatterConfig({ labels, yValues, overlays, colors, barColor, title, 
           callbacks: {
             label: (ctx) => {
               const i = ctx.dataIndex;
-              const name = labels[i] ?? `#${i + 1}`;
-              const val = ctx.parsed?.y ?? '';
-              const extra = overlays[i] ? ` ${overlays[i]}` : '';
-              return `${name}: ${val}${extra}`;
-            }
-          }
-        } : {}
-      }
+              return overlays[i] || '';
+            },
+          },
+        } : {
+          callbacks: {
+            label: (ctx) => {
+              const p = ctx.raw;
+              return `${p.origLabel || `${ctx.parsed.x}`}: ${ctx.parsed.y}`;
+            },
+          },
+        },
+      },
     },
-    plugins: [], // no circleLabelsPlugin on scatter
+    plugins: [],
   };
 }
 
@@ -226,29 +287,26 @@ async function renderBlock(blockEl) {
   const title = blockEl.dataset.sheetTitle || '';
   const blockId = blockEl.dataset.blockId || '';
   const chartType = blockEl.dataset.chartType || 'bar';
-  //const sheetId  = blockEl.dataset.sheetId || '';
-  //const label    = blockEl.dataset.label || '';
-  //const stats    = blockEl.dataset.stats || '';
-  //const overlay  = blockEl.dataset.overlay || '';
   const barColor = blockEl.dataset.barColor || '#3b82f6';
   const xAxisLabel = blockEl.dataset.xAxisLabel || '';
   const yAxisLabel = blockEl.dataset.yAxisLabel || '';
   const trendlineLabel = blockEl.dataset.trendlineLabel || '';
+  const sortOrder = blockEl.dataset.sortOrder || 'default';
 
   const canvas = blockEl.querySelector('canvas.sheets-chart-canvas');
   if (!canvas) return;
 
   try {
     const data = await getCachedData(blockId);
-    const { labels, values, overlays } = normalizeForChart(data);
+    let { labels, values, overlays } = normalizeForChart(data);
 
-    // return strings to retain .0 formatting
-    const yValues = values.map((v) => Number(v));
-
-    //const yValues = (Array.isArray(values) ? values : []).map((raw) => {
-    //    const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
-    //    return Number.isFinite(num) ? num.toFixed(1) : "0.0";
-    //});
+    // Apply sorting for bar charts only
+    if (chartType === 'bar') {
+      const sorted = sortChartData(labels, values, overlays, sortOrder);
+      labels = sorted.labels;
+      values = sorted.values;
+      overlays = sorted.overlays;
+    }
 
     // color ramp by value
     const maxVal = Math.max(...values);
@@ -260,7 +318,6 @@ async function renderBlock(blockEl) {
     });
 
     // set font
-    // helper function
     async function useMontserrat(blockEl) {
       // ensure the font is ready (modern browsers)
       try { await (document.fonts?.load('12px "Montserrat"') || Promise.resolve()); } catch { }
@@ -278,7 +335,7 @@ async function renderBlock(blockEl) {
     const ctx = canvas.getContext('2d');
 
     const config = (chartType === 'scatter')
-      ? getScatterConfig({ labels, yValues, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel })
+      ? getScatterConfig({ labels, values, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel })
       : getBarConfig({ labels, values, overlays, colors, barColor, title });
 
     const chart = new Chart(ctx, config);

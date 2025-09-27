@@ -64,6 +64,10 @@
     "yAxisData": {
       "type": "string",
       "default": ""
+    },
+    "sortOrder": {
+      "type": "string",
+      "default": "default"
     }
   },
   "supports": {

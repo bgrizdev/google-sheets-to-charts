@@ -12,7 +12,7 @@ Chart.register(trendlinePlugin);
 registerBlockType(metadata, {
 
     edit: ({ attributes, setAttributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData, sortOrder } = attributes;
         const blockProps = useBlockProps();
         const [status, setStatus] = useState('');
         const [previewData, setPreviewData] = useState(null);
@@ -65,6 +65,50 @@ registerBlockType(metadata, {
             });
 
             return { labels, values, overlays };
+        };
+
+        // helper function to sort data for bar charts
+        const sortChartData = (labels, values, overlays, sortOrder) => {
+            if (!sortOrder || sortOrder === 'default') {
+                return { labels, values, overlays };
+            }
+
+            // Create array of indices with data for sorting
+            const dataWithIndices = labels.map((label, i) => ({
+                index: i,
+                label,
+                value: Number(values[i]),
+                overlay: overlays[i]
+            }));
+
+            // Sort based on sortOrder
+            switch (sortOrder) {
+                case 'alphabetical-asc':
+                    dataWithIndices.sort((a, b) => a.label.localeCompare(b.label));
+                    break;
+                case 'alphabetical-desc':
+                    dataWithIndices.sort((a, b) => b.label.localeCompare(a.label));
+                    break;
+                case 'value-high-low':
+                    dataWithIndices.sort((a, b) => b.value - a.value);
+                    break;
+                case 'value-low-high':
+                    dataWithIndices.sort((a, b) => a.value - b.value);
+                    break;
+                default:
+                    return { labels, values, overlays };
+            }
+
+            // Extract sorted data
+            const sortedLabels = dataWithIndices.map(item => item.label);
+            const sortedValues = dataWithIndices.map(item => values[item.index]);
+            const sortedOverlays = dataWithIndices.map(item => item.overlay);
+
+            return { 
+                labels: sortedLabels, 
+                values: sortedValues, 
+                overlays: sortedOverlays 
+            };
         };
 
         // helper function to create plugin for custom chart labels 
@@ -328,7 +372,15 @@ registerBlockType(metadata, {
         useEffect(() => {
             if (!previewData || !canvasRef.current) return;
 
-            const { labels, values, overlays } = normalizeForChart(previewData);
+            let { labels, values, overlays } = normalizeForChart(previewData);
+
+            // Apply sorting for bar charts only
+            if (attributes.chartType === 'bar') {
+                const sorted = sortChartData(labels, values, overlays, attributes.sortOrder);
+                labels = sorted.labels;
+                values = sorted.values;
+                overlays = sorted.overlays;
+            }
 
             // opacity scaling for colors
             const maxVal = Math.max(...values);
@@ -375,7 +427,7 @@ registerBlockType(metadata, {
                 chartRef.current = null;
             };
 
-        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel, attributes.trendlineLabel]);
+        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel, attributes.trendlineLabel, attributes.sortOrder]);
 
         // loads the preview up  
         useEffect(() => {
@@ -492,6 +544,19 @@ registerBlockType(metadata, {
                                         placeholder: 'O2:O13',
                                         onChange: (value) => setAttributes({ stats: value }),
                                         help: 'Enter the range of stats you want to display, e.g., O2:O13'
+                                    }),
+                                    createElement(RadioControl, {
+                                        label: 'Sort Order',
+                                        selected: sortOrder || 'default',
+                                        options: [
+                                            { label: 'Default / Sheet Order', value: 'default' },
+                                            { label: 'Alphabetical (A→Z)', value: 'alphabetical-asc' },
+                                            { label: 'Alphabetical (Z→A)', value: 'alphabetical-desc' },
+                                            { label: 'Stat Value (High→Low)', value: 'value-high-low' },
+                                            { label: 'Stat Value (Low→High)', value: 'value-low-high' },
+                                        ],
+                                        onChange: (selected) => setAttributes({ sortOrder: selected }),
+                                        help: 'Choose how to sort the bars in the chart.'
                                     })
                                 ),
 
@@ -597,7 +662,7 @@ registerBlockType(metadata, {
 
     },
     save: ({ attributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays = [], barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays = [], barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData, sortOrder } = attributes;
         const overlaysToSave = overlays.length ? overlays : (overlay ? [overlay] : []);
 
         return createElement(
@@ -617,7 +682,8 @@ registerBlockType(metadata, {
                 'data-y-axis-label': yAxisLabel ?? '',
                 'data-trendline-label': trendlineLabel ?? '',
                 'data-x-axis-data': xAxisData ?? '',
-                'data-y-axis-data': yAxisData ?? ''
+                'data-y-axis-data': yAxisData ?? '',
+                'data-sort-order': sortOrder ?? 'default'
             },
             createElement('div', { className: 'sheets-chart-canvas-wrap', style: { height: '420px', maxWidth: '800px' } },
                 createElement('canvas', { className: 'sheets-chart-canvas' })
