@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Sheets Chart Block
  * Description: Connects to Google Sheets, fetches data, and displays it in a chart.js Gutenberg block.
- * Version: 1.0
+ * Version: 1.2
  * Author: Ben G
  */
 
