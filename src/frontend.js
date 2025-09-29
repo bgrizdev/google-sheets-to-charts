@@ -138,8 +138,7 @@ function getBarConfig({ labels, values, overlays, colors, barColor, title }) {
         label: 'Rating',
         data: yValues,
         backgroundColor: colors,
-        borderColor: barColor,
-        borderWidth: 1,
+        borderWidth: 0,
         borderRadius: 20,
         categoryPercentage: 0.9,
         barPercentage: 0.9
@@ -150,8 +149,8 @@ function getBarConfig({ labels, values, overlays, colors, barColor, title }) {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        x: { grid: { display: false }, ticks: { display: false } },
-        y: { grid: { display: false }, ticks: { color: '#000', font: { size: 14 } } },
+        x: { grid: { display: false }, ticks: { display: false }, drawBorder: false },
+        y: { grid: { display: false }, ticks: { color: '#000', font: { size: 14 } }, drawBorder: false },
       },
       plugins: {
         legend: { display: false },
@@ -192,11 +191,13 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
         label: 'Rating',
         data: points,
         backgroundColor: colors,
-        borderColor: barColor,
+        borderColor: '#a9a9a9',
         pointRadius: 5,
         trendlineLinear: {
-          style: 'rgba(111, 207, 192, 0.7)',
-          color: 'rgba(111, 207, 192, 0.7)',
+          style: '#a9a9a9',
+          color: '#a9a9a9',
+          borderColor: '#a9a9a9',
+          backgroundColor: '#a9a9a9',
           lineStyle: 'solid',
           width: 3,
           projection: true,
@@ -223,6 +224,7 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
             callback: (v) => `${v}`,
           },
           grid: { display: false },
+          drawBorder: false,
           title: {
             display: !!xAxisLabel,
             text: xAxisLabel || '',
@@ -236,6 +238,7 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
             font: { size: 14 },
           },
           grid: { display: false },
+          drawBorder: false,
           title: {
             display: !!yAxisLabel,
             text: yAxisLabel || '',

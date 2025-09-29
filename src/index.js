@@ -104,10 +104,10 @@ registerBlockType(metadata, {
             const sortedValues = dataWithIndices.map(item => values[item.index]);
             const sortedOverlays = dataWithIndices.map(item => item.overlay);
 
-            return { 
-                labels: sortedLabels, 
-                values: sortedValues, 
-                overlays: sortedOverlays 
+            return {
+                labels: sortedLabels,
+                values: sortedValues,
+                overlays: sortedOverlays
             };
         };
 
@@ -150,96 +150,95 @@ registerBlockType(metadata, {
         // helper for chartType config settings
         function getChartConfig(type, { labels, values, overlays, colors, barColor }) {
             if (type === 'scatter') {
-            // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
-            const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
-            const xs = labels.map(toNum);
-            const ys = values.map((v) => Number(v));
+                // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
+                const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
+                const xs = labels.map(toNum);
+                const ys = values.map((v) => Number(v));
 
-            // 2) Points with original label for tooltip
-            const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '' }));
+                // 2) Points with original label for tooltip
+                const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '' }));
 
-            // detect if prices are all non-negative
-            const nonNegativeX = xs.every(n => n >= 0);
+                // detect if prices are all non-negative
+                const nonNegativeX = xs.every(n => n >= 0);
 
-            return {
-                type: 'scatter',
-                data: {
-                datasets: [{
-                    label: 'Rating',
-                    data: points,
-                    backgroundColor: colors,
-                    borderColor: barColor,
-                    pointRadius: 5,
-                    trendlineLinear: {
-                    style: 'rgba(111, 207, 192, 0.7)',
-                    color: 'rgba(111, 207, 192, 0.7)',
-                    lineStyle: 'solid',
-                    width: 3,
-                    projection: true,
-                    label: {
-                        text: attributes.trendlineLabel || 'Trendline',
-                        display: true,
-                        displayValue: false,
-                        offset: 15,
-                    }
-                    }
-                }],
-                },
-                options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                    type: 'linear',
-                    beginAtZero: nonNegativeX, // keeps prices from going negative
-                    grace: '5%',               // built-in padding
-                    ticks: {
-                        // keep the axis readable (about 6 ticks)
-                        maxTicksLimit: 6,
-                        callback: (v) => `$${v}`,
+                return {
+                    type: 'scatter',
+                    data: {
+                        datasets: [{
+                            label: 'Rating',
+                            data: points,
+                            backgroundColor: colors,
+                            borderColor: '#a9a9a9',
+                            pointRadius: 5,
+                            trendlineLinear: {
+                                lineStyle: 'solid',
+                                width: 3,
+                                projection: true,
+                                label: {
+                                    text: attributes.trendlineLabel || 'Trendline',
+                                    display: true,
+                                    displayValue: false,
+                                    offset: 15,
+                                }
+                            }
+                        }],
                     },
-                    grid: { display: false },
-                    title: {
-                        display: !!attributes.xAxisLabel,
-                        text: attributes.xAxisLabel || '',
-                        font: { size: 14 },
-                    },
-                    },
-                    y: {
-                    grace: '5%',               // built-in padding
-                    ticks: {
-                        maxTicksLimit: 6,
-                        font: { size: 14 },
-                    },
-                    grid: { display: false },
-                    title: {
-                        display: !!attributes.yAxisLabel,
-                        text: attributes.yAxisLabel || '',
-                        font: { size: 14 },
-                    },
-                    },
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: overlays.length ? {
-                        callbacks: {
-                            label: (ctx) => {
-                                const i = ctx.dataIndex;
-                                return overlays[i] || '';
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                type: 'linear',
+                                beginAtZero: nonNegativeX, // keeps prices from going negative
+                                grace: '5%',               // built-in padding
+                                ticks: {
+                                    maxTicksLimit: 6,
+                                    callback: (v) => `$${v}`,
+                                },
+                                grid: { display: false },
+                                drawBorder: false,
+                                title: {
+                                    display: !!attributes.xAxisLabel,
+                                    text: attributes.xAxisLabel || '',
+                                    font: { size: 14 },
+                                },
+                            },
+                            y: {
+                                grace: '5%',               // built-in padding
+                                ticks: {
+                                    maxTicksLimit: 6,
+                                    font: { size: 14 },
+                                },
+                                grid: { display: false },
+                                drawBorder: false,
+                                title: {
+                                    display: !!attributes.yAxisLabel,
+                                    text: attributes.yAxisLabel || '',
+                                    font: { size: 14 },
+                                },
                             },
                         },
-                    } : {
-                        callbacks: {
-                            label: (ctx) => {
-                                const p = ctx.raw;
-                                return `${p.origLabel || `${ctx.parsed.x}`}: ${ctx.parsed.y}`;
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: overlays.length ? {
+                                callbacks: {
+                                    label: (ctx) => {
+                                        const i = ctx.dataIndex;
+                                        return overlays[i] || '';
+                                    },
+                                },
+                            } : {
+                                callbacks: {
+                                    label: (ctx) => {
+                                        const p = ctx.raw;
+                                        return `${p.origLabel || `${ctx.parsed.x}`}: ${ctx.parsed.y}`;
+                                    },
+                                },
                             },
                         },
                     },
-                },
-                },
-                plugins: [],
-            };
+                    plugins: [],
+                };
             }
 
 
@@ -252,9 +251,8 @@ registerBlockType(metadata, {
                         label: 'Rating',
                         data: values,
                         backgroundColor: colors,
-                        borderColor: barColor,
                         borderRadius: 20,
-                        borderWidth: 1,
+                        borderWidth: 0,
                     }],
                 },
                 options: {
@@ -262,8 +260,8 @@ registerBlockType(metadata, {
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
-                        x: { grid: { display: false }, ticks: { display: false } },
-                        y: { grid: { display: false }, ticks: { color: '#000', font: { size: 14 } } },
+                        x: { grid: { display: false, drawBorder: false }, ticks: { display: false } },
+                        y: { grid: { display: false, drawBorder: false }, ticks: { color: '#000', font: { size: 14 } }, drawBorder: false },
                     },
                     elements: { categoryPercentage: 1.5 },
                     plugins: {
@@ -309,10 +307,10 @@ registerBlockType(metadata, {
             setStatus('Fetching...');
             try {
                 // Use different data ranges based on chart type
-                const dataToSend = chartType === 'scatter' 
+                const dataToSend = chartType === 'scatter'
                     ? { sheetId, blockId, label: xAxisData, stats: yAxisData, overlays }
                     : { sheetId, blockId, label, stats, overlays };
-                    
+
                 await apiFetch({
                     path: '/sheets-chart/v1/fetch-data',
                     method: 'POST',
@@ -330,10 +328,10 @@ registerBlockType(metadata, {
             setStatus('Refreshing...');
             try {
                 // Use different data ranges based on chart type
-                const dataToSend = chartType === 'scatter' 
+                const dataToSend = chartType === 'scatter'
                     ? { sheetId, blockId, label: xAxisData, stats: yAxisData, overlays }
                     : { sheetId, blockId, label, stats, overlays };
-                    
+
                 await apiFetch({
                     path: '/sheets-chart/v1/refresh-fetch-data',
                     method: 'POST',
@@ -652,7 +650,7 @@ registerBlockType(metadata, {
                     createElement('h3', null, 'Preview'),
                     createElement(
                         'div',
-                        { style: { marginTop: '0.5rem', height: '420px', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px', maxWidth: '800px' } },
+                        { style: { marginTop: '0.5rem', height: '420px', borderRadius: '6px', padding: '8px', maxWidth: '800px' } },
                         createElement('canvas', { ref: canvasRef, style: { width: '100%', height: '100%' } })
                     )
                 )
