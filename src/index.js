@@ -193,7 +193,11 @@ registerBlockType(metadata, {
                                 grace: '5%',               // built-in padding
                                 ticks: {
                                     maxTicksLimit: 6,
-                                    callback: (v) => `$${v}`,
+                                    callback: (v) => {
+                                        // Try to preserve dollar sign formatting if original labels had them
+                                        const hasDollar = labels.some(l => String(l).includes('$'));
+                                        return hasDollar ? `$${v}` : `${v}`;
+                                    },
                                 },
                                 grid: { display: false },
                                 drawBorder: false,
@@ -222,9 +226,39 @@ registerBlockType(metadata, {
                             legend: { display: false },
                             tooltip: overlays.length ? {
                                 callbacks: {
+                                    title: (ctx) => {
+                                        const i = ctx[0].dataIndex;
+                                        if (overlays[i]) {
+                                            // Extract first overlay item as title (before first bullet)
+                                            const overlayParts = overlays[i].split(' • ');
+                                            return overlayParts[0] || '';
+                                        }
+                                        return '';
+                                    },
                                     label: (ctx) => {
+                                        const p = ctx.raw;
+                                        const hasDollar = labels.some(l => String(l).includes('$'));
+                                        const xValue = hasDollar ? `$${ctx.parsed.x}` : ctx.parsed.x;
+                                        
+                                        // Show axis values with their labels
+                                        const lines = [];
+                                        if (attributes.xAxisLabel) {
+                                            lines.push(`${attributes.xAxisLabel}: ${xValue}`);
+                                        }
+                                        if (attributes.yAxisLabel) {
+                                            lines.push(`${attributes.yAxisLabel}: ${ctx.parsed.y}`);
+                                        }
+                                        
+                                        return lines;
+                                    },
+                                    afterLabel: (ctx) => {
                                         const i = ctx.dataIndex;
-                                        return overlays[i] || '';
+                                        if (overlays[i]) {
+                                            // Show remaining overlay items (skip first one used as title)
+                                            const overlayParts = overlays[i].split(' • ');
+                                            return overlayParts.slice(1); // Return remaining items as array
+                                        }
+                                        return '';
                                     },
                                 },
                             } : {
