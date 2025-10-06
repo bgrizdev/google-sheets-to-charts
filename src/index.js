@@ -310,7 +310,15 @@ registerBlockType(metadata, {
                         },
                         tooltip: overlays.length ? {
                             callbacks: {
-                                afterLabel: (ctx) => overlays[ctx.dataIndex] ? ` ${overlays[ctx.dataIndex]}` : '',
+                                afterLabel: (ctx) => {
+                                        const i = ctx.dataIndex;
+                                        if (overlays[i]) {
+                                            // each item should be on it's own line
+                                            const overlayParts = overlays[i].split(' • ');
+                                            return overlayParts;
+                                        }
+                                        return '';
+                                    },
                             },
                         } : {},
                     },
