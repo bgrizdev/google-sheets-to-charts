@@ -318,7 +318,7 @@ registerBlockType(metadata, {
                                             return overlayParts;
                                         }
                                         return '';
-                                    },
+                                },
                             },
                         } : {},
                     },
