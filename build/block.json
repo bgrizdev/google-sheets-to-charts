@@ -53,6 +53,14 @@
       "type": "string",
       "default": ""
     },
+    "axisPrependSymbol": {
+      "type": "string",
+      "default": ""
+    },
+    "axisSymbolSelection": {
+      "type": "string",
+      "default": ""
+    },
     "trendlineLabel": {
       "type": "string",
       "default": ""

@@ -12,7 +12,7 @@ Chart.register(trendlinePlugin);
 registerBlockType(metadata, {
 
     edit: ({ attributes, setAttributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData, sortOrder } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, axisPrependSymbol, axisSymbolSelection, trendlineLabel, xAxisData, yAxisData, sortOrder } = attributes;
         const blockProps = useBlockProps();
         const [status, setStatus] = useState('');
         const [previewData, setPreviewData] = useState(null);
@@ -41,7 +41,7 @@ registerBlockType(metadata, {
             // parse numeric stats, stripping symbols like $ or %
             const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
                 const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
-                return Number.isFinite(num) ? num.toFixed(1) : "0.0";
+                return Number.isFinite(num) ? num : 0;
             });
 
             // Build one tooltip line per row by joining "Header: Value" for each overlay
@@ -161,6 +161,22 @@ registerBlockType(metadata, {
                 // detect if prices are all non-negative
                 const nonNegativeX = xs.every(n => n >= 0);
 
+                // Calculate dynamic ranges for better tick display
+                const xMin = Math.min(...xs);
+                const xMax = Math.max(...xs);
+                const yMin = Math.min(...ys);
+                const yMax = Math.max(...ys);
+
+                // Calculate appropriate step size for ticks
+                const getStepSize = (min, max) => {
+                    const range = max - min;
+                    if (range <= 1) return 0.1;
+                    if (range <= 2) return 0.2;
+                    if (range <= 5) return 0.5;
+                    if (range <= 10) return 1;
+                    return Math.ceil(range / 6);
+                };
+
                 return {
                     type: 'scatter',
                     data: {
@@ -189,14 +205,19 @@ registerBlockType(metadata, {
                         scales: {
                             x: {
                                 type: 'linear',
-                                beginAtZero: nonNegativeX, // keeps prices from going negative
-                                grace: '5%',               // built-in padding
+                                beginAtZero: false, // let it auto-scale based on data
+                                min: xMin - (xMax - xMin) * 0.05, // 5% padding below min
+                                max: xMax + (xMax - xMin) * 0.05, // 5% padding above max
                                 ticks: {
-                                    maxTicksLimit: 6,
+                                    stepSize: getStepSize(xMin, xMax),
                                     callback: (v) => {
-                                        // Try to preserve dollar sign formatting if original labels had them
-                                        const hasDollar = labels.some(l => String(l).includes('$'));
-                                        return hasDollar ? `$${v}` : `${v}`;
+                                        // Format to appropriate decimal places
+                                        const formatted = Number(v).toFixed(1);
+                                        if (axisPrependSymbol && axisSymbolSelection == 'x') {
+                                            return axisPrependSymbol + formatted;
+                                        } else {
+                                            return formatted;
+                                        }
                                     },
                                 },
                                 grid: { display: false },
@@ -212,6 +233,13 @@ registerBlockType(metadata, {
                                 ticks: {
                                     maxTicksLimit: 6,
                                     font: { size: 14 },
+                                    callback: (v) => {
+                                        if (axisPrependSymbol && axisSymbolSelection == 'y') {
+                                            return axisPrependSymbol + v;
+                                        } else {
+                                            return v;
+                                        }
+                                    },
                                 },
                                 grid: { display: false },
                                 drawBorder: false,
@@ -239,7 +267,7 @@ registerBlockType(metadata, {
                                         const p = ctx.raw;
                                         const hasDollar = labels.some(l => String(l).includes('$'));
                                         const xValue = hasDollar ? `$${ctx.parsed.x}` : ctx.parsed.x;
-                                        
+
                                         // Show axis values with their labels
                                         const lines = [];
                                         if (attributes.xAxisLabel) {
@@ -248,7 +276,7 @@ registerBlockType(metadata, {
                                         if (attributes.yAxisLabel) {
                                             lines.push(`${attributes.yAxisLabel}: ${ctx.parsed.y}`);
                                         }
-                                        
+
                                         return lines;
                                     },
                                     afterLabel: (ctx) => {
@@ -311,13 +339,13 @@ registerBlockType(metadata, {
                         tooltip: overlays.length ? {
                             callbacks: {
                                 afterLabel: (ctx) => {
-                                        const i = ctx.dataIndex;
-                                        if (overlays[i]) {
-                                            // each item should be on it's own line
-                                            const overlayParts = overlays[i].split(' • ');
-                                            return overlayParts;
-                                        }
-                                        return '';
+                                    const i = ctx.dataIndex;
+                                    if (overlays[i]) {
+                                        // each item should be on it's own line
+                                        const overlayParts = overlays[i].split(' • ');
+                                        return overlayParts;
+                                    }
+                                    return '';
                                 },
                             },
                         } : {},
@@ -467,7 +495,7 @@ registerBlockType(metadata, {
                 chartRef.current = null;
             };
 
-        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel, attributes.trendlineLabel, attributes.sortOrder]);
+        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel, attributes.trendlineLabel, attributes.sortOrder, attributes.axisPrependSymbol, attributes.axisSymbolSelection]);
 
         // loads the preview up  
         useEffect(() => {
@@ -618,6 +646,23 @@ registerBlockType(metadata, {
                                         placeholder: 'B2:B13',
                                         onChange: (value) => setAttributes({ yAxisData: value }),
                                         help: 'Enter the range for Y-axis data, e.g., B2:B13'
+                                    }),
+                                    createElement(TextControl, {
+                                        label: 'Axis Prepend Symbol',
+                                        value: axisPrependSymbol || '',
+                                        placeholder: 'Add a symbol to prepend on an Axis e.g., $',
+                                        onChange: (value) => setAttributes({ axisPrependSymbol: value }),
+                                        help: 'Add a symbol to prepend on an Axis e.g., $'
+                                    }),
+                                    createElement(RadioControl, {
+                                        label: 'Axis Symbol Selection',
+                                        selected: axisSymbolSelection || 'default',
+                                        options: [
+                                            { label: 'X', value: 'x' },
+                                            { label: 'Y', value: 'y' }
+                                        ],
+                                        onChange: (selected) => setAttributes({ axisSymbolSelection: selected }),
+                                        help: 'Select which axis the symbol should be displayed on'
                                     })
                                 ),
 
