@@ -76,6 +76,22 @@
     "sortOrder": {
       "type": "string",
       "default": "default"
+    },
+    "editorsPickText": {
+      "type": "string",
+      "default": ""
+    },
+    "editorsPickImage": {
+      "type": "string",
+      "default": ""
+    },
+    "budgetBuyText": {
+      "type": "string",
+      "default": ""
+    },
+    "budgetBuyImage": {
+      "type": "string",
+      "default": ""
     }
   },
   "supports": {

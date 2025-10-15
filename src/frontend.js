@@ -12,7 +12,7 @@ const normalizeForChart = (data) => {
   // parse numeric stats, stripping symbols like $ or %
   const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
     const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
-    return Number.isFinite(num) ? num.toFixed(1) : "0.0";
+    return Number.isFinite(num) ? num : 0;
   });
 
   // Build one tooltip line per row by joining "Header: Value" for each overlay
@@ -122,8 +122,88 @@ const circleLabelsPlugin = {
   }
 };
 
+// helper function to create plugin for badge display
+const createBadgePlugin = (preloadedImages, overlaysData, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage) => ({
+  id: 'badgePlugin',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    const meta = chart.getDatasetMeta(0);
+    const dataset = chart.data.datasets[0];
+
+    ctx.save();
+
+    if (chart.config.type === 'bar') {
+      // For bar charts - display badges at the end of matching bars
+      chart.data.labels.forEach((label, index) => {
+        let badgeImageUrl = null;
+
+        // Check for matches
+        if (editorsPickText && label === editorsPickText && editorsPickImage) {
+          badgeImageUrl = editorsPickImage;
+        } else if (budgetBuyText && label === budgetBuyText && budgetBuyImage) {
+          badgeImageUrl = budgetBuyImage;
+        }
+
+        if (badgeImageUrl && preloadedImages[badgeImageUrl] && meta.data[index]) {
+          const bar = meta.data[index];
+          const img = preloadedImages[badgeImageUrl];
+
+          // Position badge at the end of the bar
+          const x = bar.x + 15; // 15px to the right of bar end
+          const y = bar.y - 10; // Slightly above center
+          const size = 20; // Badge size
+
+          ctx.drawImage(img, x, y, size, size);
+        }
+      });
+    } else if (chart.config.type === 'scatter') {
+      // For scatter charts - display badges next to matching dots
+      dataset.data.forEach((point, index) => {
+        let badgeImageUrl = null;
+
+        // For scatter charts, get product name from the passed overlaysData
+        let productName = '';
+
+        // Use the overlaysData parameter which contains the correct normalized data
+        if (overlaysData && overlaysData.length > 0 && overlaysData[index]) {
+          // Extract product name from the overlay string (e.g., "Product: Six Moon Designs Wy'East")
+          const overlayParts = overlaysData[index].split(' • ');
+          const rawProductName = overlayParts[0] || '';
+          // Remove "Product: " prefix if it exists
+          productName = rawProductName.replace(/^Product:\s*/, '');
+        }
+
+        // Check for matches (case-insensitive and trimmed)
+        const normalizedProductName = productName.trim().toLowerCase();
+        const normalizedEditorsPickText = (editorsPickText || '').trim().toLowerCase();
+        const normalizedBudgetBuyText = (budgetBuyText || '').trim().toLowerCase();
+
+        if (editorsPickText && normalizedProductName === normalizedEditorsPickText && editorsPickImage) {
+          badgeImageUrl = editorsPickImage;
+        } else if (budgetBuyText && normalizedProductName === normalizedBudgetBuyText && budgetBuyImage) {
+          badgeImageUrl = budgetBuyImage;
+        }
+
+        if (badgeImageUrl && preloadedImages[badgeImageUrl] && meta.data[index]) {
+          const dot = meta.data[index];
+          const img = preloadedImages[badgeImageUrl];
+
+          // Position badge next to the dot
+          const x = dot.x + 10; // 10px to the right of dot
+          const y = dot.y - 10; // 10px above dot center
+          const size = 16; // Badge size for scatter
+
+          ctx.drawImage(img, x, y, size, size);
+        }
+      });
+    }
+
+    ctx.restore();
+  }
+});
+
 // BAR CONFIG
-function getBarConfig({ labels, values, overlays, colors, barColor, title }) {
+function getBarConfig({ labels, values, overlays, colors, barColor, title, preloadedImages = {}, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage }) {
 
   const yValues = (Array.isArray(values) ? values : []).map((raw) => {
     const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
@@ -174,13 +254,13 @@ function getBarConfig({ labels, values, overlays, colors, barColor, title }) {
         } : {},
       }
     },
-    plugins: [circleLabelsPlugin]
+    plugins: [circleLabelsPlugin, createBadgePlugin(preloadedImages, overlays, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage)]
   };
 }
 
 // SCATTER CONFIG
 
-function getScatterConfig({ labels, values, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel }) {
+function getScatterConfig({ labels, values, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages = {}, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage, axisPrependSymbol, axisSymbolSelection }) {
   // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
   const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
   const xs = labels.map(toNum);
@@ -191,6 +271,22 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
 
   // detect if prices are all non-negative
   const nonNegativeX = xs.every(n => n >= 0);
+
+  // Calculate dynamic ranges for better tick display
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  
+  // Calculate appropriate step size for ticks
+  const getStepSize = (min, max) => {
+    const range = max - min;
+    if (range <= 1) return 0.1;
+    if (range <= 2) return 0.2;
+    if (range <= 5) return 0.5;
+    if (range <= 10) return 1;
+    return Math.ceil(range / 6);
+  };
 
   return {
     type: 'scatter',
@@ -224,15 +320,19 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
       scales: {
         x: {
           type: 'linear',
-          beginAtZero: nonNegativeX, // keeps prices from going negative
-          grace: '5%',               // built-in padding
+          beginAtZero: false, // let it auto-scale based on data
+          min: xMin - (xMax - xMin) * 0.05, // 5% padding below min
+          max: xMax + (xMax - xMin) * 0.05, // 5% padding above max
           ticks: {
-            // keep the axis readable (about 6 ticks)
-            maxTicksLimit: 6,
+            stepSize: getStepSize(xMin, xMax),
             callback: (v) => {
-              // Try to preserve dollar sign formatting if original labels had them
-              const hasDollar = labels.some(l => String(l).includes('$'));
-              return hasDollar ? `$${v}` : `${v}`;
+              // Format to appropriate decimal places
+              const formatted = Number(v).toFixed(1);
+              if(axisPrependSymbol && axisSymbolSelection == 'x'){
+                return axisPrependSymbol + formatted;
+              } else {
+                return formatted;
+              }
             },
           },
           grid: { display: false },
@@ -248,6 +348,13 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
           ticks: {
             maxTicksLimit: 6,
             font: { size: 14 },
+            callback: (v) => {
+              if (axisPrependSymbol && axisSymbolSelection == 'y') {
+                return axisPrependSymbol + v;
+              } else {
+                return v;
+              }
+            },
           },
           grid: { display: false },
           drawBorder: false,
@@ -312,7 +419,7 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
         },
       },
     },
-    plugins: [],
+    plugins: [createBadgePlugin(preloadedImages, overlays, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage)],
   };
 }
 
@@ -337,6 +444,12 @@ async function renderBlock(blockEl) {
   const yAxisLabel = blockEl.dataset.yAxisLabel || '';
   const trendlineLabel = blockEl.dataset.trendlineLabel || '';
   const sortOrder = blockEl.dataset.sortOrder || 'default';
+  const editorsPickText = blockEl.dataset.editorsPickText || '';
+  const editorsPickImage = blockEl.dataset.editorsPickImage || '';
+  const budgetBuyText = blockEl.dataset.budgetBuyText || '';
+  const budgetBuyImage = blockEl.dataset.budgetBuyImage || '';
+  const axisPrependSymbol = blockEl.dataset.axisPrependSymbol || '';
+  const axisSymbolSelection = blockEl.dataset.axisSymbolSelection || '';
 
   const canvas = blockEl.querySelector('canvas.sheets-chart-canvas');
   if (!canvas) return;
@@ -377,11 +490,41 @@ async function renderBlock(blockEl) {
 
     await useMontserrat(blockEl);
 
+    // Preload badge images
+    const preloadImages = async () => {
+      const imagesToLoad = [];
+      const preloadedImages = {};
+      
+      if (editorsPickImage) {
+        imagesToLoad.push(editorsPickImage);
+      }
+      if (budgetBuyImage) {
+        imagesToLoad.push(budgetBuyImage);
+      }
+      
+      const loadPromises = imagesToLoad.map(url => {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            preloadedImages[url] = img;
+            resolve();
+          };
+          img.onerror = () => resolve(); // Continue even if image fails to load
+          img.src = url;
+        });
+      });
+      
+      await Promise.all(loadPromises);
+      return preloadedImages;
+    };
+
+    const preloadedImages = await preloadImages();
+
     const ctx = canvas.getContext('2d');
 
     const config = (chartType === 'scatter')
-      ? getScatterConfig({ labels, values, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel })
-      : getBarConfig({ labels, values, overlays, colors, barColor, title });
+      ? getScatterConfig({ labels, values, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage, axisPrependSymbol, axisSymbolSelection })
+      : getBarConfig({ labels, values, overlays, colors, barColor, title, preloadedImages, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage });
 
     const chart = new Chart(ctx, config);
     blockEl._sheetsChart = chart;

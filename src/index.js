@@ -1,6 +1,7 @@
 import { registerBlockType } from '@wordpress/blocks';
 import { useBlockProps } from '@wordpress/block-editor';
 import { TabPanel, TextControl, Button, Tooltip, ColorPicker, RadioControl } from '@wordpress/components';
+import { MediaUpload, MediaUploadCheck } from '@wordpress/block-editor';
 import { createElement, useState, useRef, useEffect } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
 import Chart from 'chart.js/auto';
@@ -12,7 +13,7 @@ Chart.register(trendlinePlugin);
 registerBlockType(metadata, {
 
     edit: ({ attributes, setAttributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, axisPrependSymbol, axisSymbolSelection, trendlineLabel, xAxisData, yAxisData, sortOrder } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, axisPrependSymbol, axisSymbolSelection, trendlineLabel, xAxisData, yAxisData, sortOrder, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage } = attributes;
         const blockProps = useBlockProps();
         const [status, setStatus] = useState('');
         const [previewData, setPreviewData] = useState(null);
@@ -147,8 +148,94 @@ registerBlockType(metadata, {
             }
         };
 
+        // helper function to create plugin for badge display
+        const createBadgePlugin = (preloadedImages, overlaysData) => ({
+            id: 'badgePlugin',
+            afterDatasetsDraw(chart) {
+                const { ctx } = chart;
+                const meta = chart.getDatasetMeta(0);
+                const dataset = chart.data.datasets[0];
+
+                ctx.save();
+
+                // Get badge configurations
+                const editorsPickText = attributes.editorsPickText;
+                const editorsPickImage = attributes.editorsPickImage;
+                const budgetBuyText = attributes.budgetBuyText;
+                const budgetBuyImage = attributes.budgetBuyImage;
+
+                if (chart.config.type === 'bar') {
+                    // For bar charts - display badges at the end of matching bars
+                    chart.data.labels.forEach((label, index) => {
+                        let badgeImageUrl = null;
+
+                        // Check for matches
+                        if (editorsPickText && label === editorsPickText && editorsPickImage) {
+                            badgeImageUrl = editorsPickImage;
+                        } else if (budgetBuyText && label === budgetBuyText && budgetBuyImage) {
+                            badgeImageUrl = budgetBuyImage;
+                        }
+
+                        if (badgeImageUrl && preloadedImages[badgeImageUrl] && meta.data[index]) {
+                            const bar = meta.data[index];
+                            const img = preloadedImages[badgeImageUrl];
+
+                            // Position badge at the end of the bar
+                            const x = bar.x + 15; // 15px to the right of bar end
+                            const y = bar.y - 10; // Slightly above center
+                            const size = 20; // Badge size
+
+                            ctx.drawImage(img, x, y, size, size);
+                        }
+                    });
+                } else if (chart.config.type === 'scatter') {
+                    // For scatter charts - display badges next to matching dots
+                    dataset.data.forEach((point, index) => {
+                        let badgeImageUrl = null;
+
+                        // For scatter charts, get product name from the passed overlaysData
+                        let productName = '';
+
+                        // Use the overlaysData parameter which contains the correct normalized data
+                        if (overlaysData && overlaysData.length > 0 && overlaysData[index]) {
+                            // Extract product name from the overlay string (e.g., "Product: Six Moon Designs Wy'East")
+                            const overlayParts = overlaysData[index].split(' • ');
+                            const rawProductName = overlayParts[0] || '';
+                            // Remove "Product: " prefix if it exists
+                            productName = rawProductName.replace(/^Product:\s*/, '');
+                        }
+
+                        // Check for matches (case-insensitive and trimmed)
+                        const normalizedProductName = productName.trim().toLowerCase();
+                        const normalizedEditorsPickText = (editorsPickText || '').trim().toLowerCase();
+                        const normalizedBudgetBuyText = (budgetBuyText || '').trim().toLowerCase();
+
+                        if (editorsPickText && normalizedProductName === normalizedEditorsPickText && editorsPickImage) {
+                            badgeImageUrl = editorsPickImage;
+                        } else if (budgetBuyText && normalizedProductName === normalizedBudgetBuyText && budgetBuyImage) {
+                            badgeImageUrl = budgetBuyImage;
+                        }
+
+                        if (badgeImageUrl && preloadedImages[badgeImageUrl] && meta.data[index]) {
+                            const dot = meta.data[index];
+                            const img = preloadedImages[badgeImageUrl];
+
+                            // Position badge next to the dot
+                            const x = dot.x + 10; // 10px to the right of dot
+                            const y = dot.y - 10; // 10px above dot center
+                            const size = 16; // Badge size for scatter
+
+                            ctx.drawImage(img, x, y, size, size);
+                        }
+                    });
+                }
+
+                ctx.restore();
+            }
+        });
+
         // helper for chartType config settings
-        function getChartConfig(type, { labels, values, overlays, colors, barColor }) {
+        function getChartConfig(type, { labels, values, overlays, colors, barColor, preloadedImages = {} }) {
             if (type === 'scatter') {
                 // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
                 const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
@@ -264,7 +351,6 @@ registerBlockType(metadata, {
                                         return '';
                                     },
                                     label: (ctx) => {
-                                        const p = ctx.raw;
                                         const hasDollar = labels.some(l => String(l).includes('$'));
                                         const xValue = hasDollar ? `$${ctx.parsed.x}` : ctx.parsed.x;
 
@@ -299,7 +385,7 @@ registerBlockType(metadata, {
                             },
                         },
                     },
-                    plugins: [],
+                    plugins: [createBadgePlugin(preloadedImages, overlays)],
                 };
             }
 
@@ -351,7 +437,7 @@ registerBlockType(metadata, {
                         } : {},
                     },
                 },
-                plugins: [circleLabelsPlugin],
+                plugins: [circleLabelsPlugin, createBadgePlugin(preloadedImages, overlays)],
             };
         }
 
@@ -442,6 +528,8 @@ registerBlockType(metadata, {
 
             let { labels, values, overlays } = normalizeForChart(previewData);
 
+
+
             // Apply sorting for bar charts only
             if (attributes.chartType === 'bar') {
                 const sorted = sortChartData(labels, values, overlays, attributes.sortOrder);
@@ -466,36 +554,71 @@ registerBlockType(metadata, {
                 chartRef.current = null;
             }
 
-            const ctx = canvasRef.current.getContext('2d');
-            const cfg = getChartConfig(attributes.chartType, {
-                labels,
-                values,
-                overlays,
-                colors,
-                barColor: attributes.barColor || '#3b82f6',
-            });
+            // Preload badge images
+            const preloadImages = async () => {
+                const imagesToLoad = [];
+                const preloadedImages = {};
 
-            // set font 
-            async function useMontserrat(blockEl) {
-                // ensure the font is ready (modern browsers)
-                try { await (document.fonts?.load('12px "Montserrat"') || Promise.resolve()); } catch { }
+                if (attributes.editorsPickImage) {
+                    imagesToLoad.push(attributes.editorsPickImage);
+                }
+                if (attributes.budgetBuyImage) {
+                    imagesToLoad.push(attributes.budgetBuyImage);
+                }
 
-                const color = getComputedStyle(blockEl).color || '#111';
+                const loadPromises = imagesToLoad.map(url => {
+                    return new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            preloadedImages[url] = img;
+                            resolve();
+                        };
+                        img.onerror = () => resolve(); // Continue even if image fails to load
+                        img.src = url;
+                    });
+                });
 
-                Chart.defaults.font.family = '"Montserrat", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif';
-                Chart.defaults.font.size = 14;   // tweak to taste
-                Chart.defaults.font.weight = '400';
-                Chart.defaults.color = color;
-            }
+                await Promise.all(loadPromises);
+                return preloadedImages;
+            };
 
-            chartRef.current = new Chart(ctx, cfg);
+            const createChart = async () => {
+                const preloadedImages = await preloadImages();
+
+                const ctx = canvasRef.current.getContext('2d');
+                const cfg = getChartConfig(attributes.chartType, {
+                    labels,
+                    values,
+                    overlays,
+                    colors,
+                    barColor: attributes.barColor || '#3b82f6',
+                    preloadedImages
+                });
+
+                // set font 
+                async function useMontserrat(blockEl) {
+                    // ensure the font is ready (modern browsers)
+                    try { await (document.fonts?.load('12px "Montserrat"') || Promise.resolve()); } catch { }
+
+                    const color = getComputedStyle(blockEl).color || '#111';
+
+                    Chart.defaults.font.family = '"Montserrat", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif';
+                    Chart.defaults.font.size = 14;   // tweak to taste
+                    Chart.defaults.font.weight = '400';
+                    Chart.defaults.color = color;
+                }
+
+                chartRef.current = new Chart(ctx, cfg);
+            };
+
+            createChart();
 
             return () => {
                 chartRef.current?.destroy();
                 chartRef.current = null;
             };
 
-        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel, attributes.trendlineLabel, attributes.sortOrder, attributes.axisPrependSymbol, attributes.axisSymbolSelection]);
+        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel, attributes.trendlineLabel, attributes.sortOrder, attributes.axisPrependSymbol, attributes.axisSymbolSelection, attributes.editorsPickText, attributes.editorsPickImage, attributes.budgetBuyText, attributes.budgetBuyImage]);
 
         // loads the preview up  
         useEffect(() => {
@@ -563,6 +686,106 @@ registerBlockType(metadata, {
                                                 setAttributes({ barColor: color });
                                             }
                                         })
+                                    ),
+
+                                    // Editors Pick Badge Section
+                                    createElement(
+                                        'div',
+                                        { style: { marginTop: '2rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px' } },
+                                        createElement('h4', { style: { margin: '0 0 1rem 0', fontSize: '14px', fontWeight: '600' } }, 'Editor\'s Pick Badge'),
+                                        createElement(TextControl, {
+                                            label: 'Product Name to Match',
+                                            value: editorsPickText || '',
+                                            onChange: (value) => setAttributes({ editorsPickText: value }),
+                                            help: 'Enter the exact product name to show the Editor\'s Pick badge'
+                                        }),
+                                        createElement(
+                                            'div',
+                                            { style: { marginTop: '1rem' } },
+                                            createElement('label', { style: { display: 'block', marginBottom: '0.5rem', fontSize: '13px', fontWeight: '500' } }, 'Badge Image'),
+                                            createElement(MediaUploadCheck, null,
+                                                createElement(MediaUpload, {
+                                                    onSelect: (media) => setAttributes({ editorsPickImage: media.url }),
+                                                    allowedTypes: ['image'],
+                                                    value: editorsPickImage,
+                                                    render: ({ open }) => createElement(
+                                                        'div',
+                                                        null,
+                                                        editorsPickImage ? createElement(
+                                                            'div',
+                                                            null,
+                                                            createElement('img', {
+                                                                src: editorsPickImage,
+                                                                style: { maxWidth: '100px', height: 'auto', marginBottom: '0.5rem' }
+                                                            }),
+                                                            createElement(Button, {
+                                                                onClick: open,
+                                                                variant: 'secondary',
+                                                                style: { marginRight: '0.5rem' }
+                                                            }, 'Change Image'),
+                                                            createElement(Button, {
+                                                                onClick: () => setAttributes({ editorsPickImage: '' }),
+                                                                variant: 'link',
+                                                                isDestructive: true
+                                                            }, 'Remove')
+                                                        ) : createElement(Button, {
+                                                            onClick: open,
+                                                            variant: 'secondary'
+                                                        }, 'Upload Badge Image')
+                                                    )
+                                                })
+                                            )
+                                        )
+                                    ),
+
+                                    // Budget Buy Badge Section
+                                    createElement(
+                                        'div',
+                                        { style: { marginTop: '1rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px' } },
+                                        createElement('h4', { style: { margin: '0 0 1rem 0', fontSize: '14px', fontWeight: '600' } }, 'Budget Buy Badge'),
+                                        createElement(TextControl, {
+                                            label: 'Product Name to Match',
+                                            value: budgetBuyText || '',
+                                            onChange: (value) => setAttributes({ budgetBuyText: value }),
+                                            help: 'Enter the exact product name to show the Budget Buy badge'
+                                        }),
+                                        createElement(
+                                            'div',
+                                            { style: { marginTop: '1rem' } },
+                                            createElement('label', { style: { display: 'block', marginBottom: '0.5rem', fontSize: '13px', fontWeight: '500' } }, 'Badge Image'),
+                                            createElement(MediaUploadCheck, null,
+                                                createElement(MediaUpload, {
+                                                    onSelect: (media) => setAttributes({ budgetBuyImage: media.url }),
+                                                    allowedTypes: ['image'],
+                                                    value: budgetBuyImage,
+                                                    render: ({ open }) => createElement(
+                                                        'div',
+                                                        null,
+                                                        budgetBuyImage ? createElement(
+                                                            'div',
+                                                            null,
+                                                            createElement('img', {
+                                                                src: budgetBuyImage,
+                                                                style: { maxWidth: '100px', height: 'auto', marginBottom: '0.5rem' }
+                                                            }),
+                                                            createElement(Button, {
+                                                                onClick: open,
+                                                                variant: 'secondary',
+                                                                style: { marginRight: '0.5rem' }
+                                                            }, 'Change Image'),
+                                                            createElement(Button, {
+                                                                onClick: () => setAttributes({ budgetBuyImage: '' }),
+                                                                variant: 'link',
+                                                                isDestructive: true
+                                                            }, 'Remove')
+                                                        ) : createElement(Button, {
+                                                            onClick: open,
+                                                            variant: 'secondary'
+                                                        }, 'Upload Badge Image')
+                                                    )
+                                                })
+                                            )
+                                        )
                                     )
                                 );
                             }
@@ -747,7 +970,7 @@ registerBlockType(metadata, {
 
     },
     save: ({ attributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays = [], barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData, sortOrder } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays = [], barColor, chartType, blockId, xAxisLabel, yAxisLabel, trendlineLabel, xAxisData, yAxisData, sortOrder, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage, axisPrependSymbol, axisSymbolSelection } = attributes;
         const overlaysToSave = overlays.length ? overlays : (overlay ? [overlay] : []);
 
         return createElement(
@@ -768,7 +991,13 @@ registerBlockType(metadata, {
                 'data-trendline-label': trendlineLabel ?? '',
                 'data-x-axis-data': xAxisData ?? '',
                 'data-y-axis-data': yAxisData ?? '',
-                'data-sort-order': sortOrder ?? 'default'
+                'data-sort-order': sortOrder ?? 'default',
+                'data-editors-pick-text': editorsPickText ?? '',
+                'data-editors-pick-image': editorsPickImage ?? '',
+                'data-budget-buy-text': budgetBuyText ?? '',
+                'data-budget-buy-image': budgetBuyImage ?? '',
+                'data-axis-prepend-symbol': axisPrependSymbol ?? '',
+                'data-axis-symbol-selection': axisSymbolSelection ?? ''
             },
             createElement('div', { className: 'sheets-chart-canvas-wrap', style: { height: '420px', maxWidth: '800px' } },
                 createElement('canvas', { className: 'sheets-chart-canvas' })
