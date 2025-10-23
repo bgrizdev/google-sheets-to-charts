@@ -21,7 +21,24 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
         return null;
     };
 
-    // Build one batch: label + stats + each overlay + each overlay's header cell in row 1
+    // Helper: get row numbers from range
+    $getRowsFromRange = function (string $range): array {
+        if (strpos($range, '!') !== false) {
+            [, $range] = explode('!', $range, 2);
+        }
+        if (preg_match('/^[A-Za-z]+(\d+):[A-Za-z]+(\d+)$/', $range, $m)) {
+            return [(int)$m[1], (int)$m[2]];
+        }
+        return [2, 13]; // default fallback
+    };
+
+    // Get row range from the first overlay range (which should be the product names) to determine badge column range
+    // This ensures badges align with the product data
+    $firstOverlayRange = !empty($overlayRanges) ? $overlayRanges[0] : $labelRange;
+    [$startRow, $endRow] = $getRowsFromRange($firstOverlayRange);
+    $badgeRange = "C{$startRow}:C{$endRow}"; // Always use column C for badges
+
+    // Build one batch: label + stats + badge + each overlay + each overlay's header cell in row 1
     $headerRanges = [];
     foreach ($overlayRanges as $r) {
         $col = $colFromRange($r);
@@ -29,8 +46,13 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
             $headerRanges[] = $col . '1'; // assumes headers in row 1
         }
     }
+    
+    // Add badge header
+    $headerRanges[] = 'C1';
 
-    $allRanges = array_values(array_filter(array_merge([$labelRange, $statsRange], $overlayRanges, $headerRanges)));
+    $allRanges = array_values(array_filter(array_merge([$labelRange, $statsRange, $badgeRange], $overlayRanges, $headerRanges)));
+
+
 
     $resp = $service->spreadsheets_values->batchGet($spreadsheetId, ['ranges' => $allRanges]);
 
@@ -60,9 +82,32 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
         return $out;
     };
 
+    // Helper: flatten first column but preserve empty rows for proper alignment
+    $colValuesWithEmpties = function (array $matrix, int $expectedCount): array {
+        $out = [];
+        for ($i = 0; $i < $expectedCount; $i++) {
+            if (isset($matrix[$i][0]) && $matrix[$i][0] !== '') {
+                $out[] = $matrix[$i][0];
+            } else {
+                $out[] = ''; // Preserve empty cells to maintain row alignment
+            }
+        }
+        return $out;
+    };
+
     // Assemble
     $labels = $colValues($getBySuffix($labelRange));
     $stats  = $colValues($getBySuffix($statsRange));
+    
+    // For badges, we need to preserve empty cells to maintain row alignment
+    // First, get the expected count from the first overlay (product names)
+    $firstOverlayData = !empty($overlayRanges) ? $colValues($getBySuffix($overlayRanges[0])) : $labels;
+    $expectedCount = count($firstOverlayData);
+    
+    $badgeMatrix = $getBySuffix($badgeRange);
+    $badges = $colValuesWithEmpties($badgeMatrix, $expectedCount);
+
+
 
     $overlaysOut = [];
     foreach ($overlayRanges as $r) {
@@ -74,11 +119,13 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
             'header' => $header,
             'values' => $values,
         ];
+
     }
 
     return [
         'labels'   => $labels,
         'stats'    => $stats,
+        'badges'   => $badges,
         'overlays' => $overlaysOut,
     ];
 }

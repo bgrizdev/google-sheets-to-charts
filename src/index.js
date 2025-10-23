@@ -13,7 +13,7 @@ Chart.register(trendlinePlugin);
 registerBlockType(metadata, {
 
     edit: ({ attributes, setAttributes }) => {
-        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, axisPrependSymbol, axisSymbolSelection, trendlineLabel, xAxisData, yAxisData, sortOrder, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage } = attributes;
+        const { title, sheetId, label, stats, overlay, overlays, barColor, chartType, blockId, xAxisLabel, yAxisLabel, axisPrependSymbol, axisSymbolSelection, trendlineLabel, xAxisData, yAxisData, sortOrder } = attributes;
         const blockProps = useBlockProps();
         const [status, setStatus] = useState('');
         const [previewData, setPreviewData] = useState(null);
@@ -33,11 +33,12 @@ registerBlockType(metadata, {
         }, [blockId, setAttributes]);
 
         // helper function to normalize data for chart
-        // data = { labels: string[], stats: string[], overlays: [{header, values, range}] }
+        // data = { labels: string[], stats: string[], badges: string[], overlays: [{header, values, range}] }
         const normalizeForChart = (data) => {
-            if (!data) return { labels: [], values: [], overlays: [] };
+            if (!data) return { labels: [], values: [], overlays: [], badges: [] };
 
             const labels = Array.isArray(data.labels) ? data.labels.map(String) : [];
+            const badges = Array.isArray(data.badges) ? data.badges.map(String) : [];
 
             // parse numeric stats, stripping symbols like $ or %
             const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
@@ -50,6 +51,7 @@ registerBlockType(metadata, {
             const rowCount = Math.max(
                 labels.length,
                 values.length,
+                badges.length,
                 ...overlayDefs.map(o => (o?.values?.length ?? 0))
             );
 
@@ -65,13 +67,13 @@ registerBlockType(metadata, {
                 return parts.join(' • '); // what your tooltip reads via overlays[ctx.dataIndex]
             });
 
-            return { labels, values, overlays };
+            return { labels, values, badges, overlays };
         };
 
         // helper function to sort data for bar charts
-        const sortChartData = (labels, values, overlays, sortOrder) => {
+        const sortChartData = (labels, values, badges, overlays, sortOrder) => {
             if (!sortOrder || sortOrder === 'default') {
-                return { labels, values, overlays };
+                return { labels, values, badges, overlays };
             }
 
             // Create array of indices with data for sorting
@@ -79,6 +81,7 @@ registerBlockType(metadata, {
                 index: i,
                 label,
                 value: Number(values[i]),
+                badge: badges[i],
                 overlay: overlays[i]
             }));
 
@@ -97,17 +100,19 @@ registerBlockType(metadata, {
                     dataWithIndices.sort((a, b) => a.value - b.value);
                     break;
                 default:
-                    return { labels, values, overlays };
+                    return { labels, values, badges, overlays };
             }
 
             // Extract sorted data
             const sortedLabels = dataWithIndices.map(item => item.label);
             const sortedValues = dataWithIndices.map(item => values[item.index]);
+            const sortedBadges = dataWithIndices.map(item => badges[item.index]);
             const sortedOverlays = dataWithIndices.map(item => item.overlay);
 
             return {
                 labels: sortedLabels,
                 values: sortedValues,
+                badges: sortedBadges,
                 overlays: sortedOverlays
             };
         };
@@ -149,7 +154,7 @@ registerBlockType(metadata, {
         };
 
         // helper function to create plugin for badge display
-        const createBadgePlugin = (preloadedImages, overlaysData) => ({
+        const createBadgePlugin = (preloadedImages, badgesData) => ({
             id: 'badgePlugin',
             afterDatasetsDraw(chart) {
                 const { ctx } = chart;
@@ -158,21 +163,23 @@ registerBlockType(metadata, {
 
                 ctx.save();
 
-                // Get badge configurations
-                const editorsPickText = attributes.editorsPickText;
-                const editorsPickImage = attributes.editorsPickImage;
-                const budgetBuyText = attributes.budgetBuyText;
-                const budgetBuyImage = attributes.budgetBuyImage;
+                // Get badge configurations from global settings
+                const globalSettings = window.gstcSettings?.badgeSettings || {};
+                const editorsPickImage = globalSettings.editor_pick_badge_image;
+                const budgetBuyImage = globalSettings.budget_badge_image;
+
+
 
                 if (chart.config.type === 'bar') {
-                    // For bar charts - display badges at the end of matching bars
+                    // For bar charts - display badges at the end of bars based on badge column data
                     chart.data.labels.forEach((label, index) => {
                         let badgeImageUrl = null;
+                        const badgeValue = badgesData && badgesData[index] ? badgesData[index].trim() : '';
 
-                        // Check for matches
-                        if (editorsPickText && label === editorsPickText && editorsPickImage) {
+                        // Check badge column value and assign appropriate image
+                        if (badgeValue && badgeValue.toLowerCase().includes('editor') && editorsPickImage) {
                             badgeImageUrl = editorsPickImage;
-                        } else if (budgetBuyText && label === budgetBuyText && budgetBuyImage) {
+                        } else if (badgeValue && badgeValue.toLowerCase().includes('budget') && budgetBuyImage) {
                             badgeImageUrl = budgetBuyImage;
                         }
 
@@ -180,39 +187,43 @@ registerBlockType(metadata, {
                             const bar = meta.data[index];
                             const img = preloadedImages[badgeImageUrl];
 
-                            // Position badge at the end of the bar
-                            const x = bar.x + 15; // 15px to the right of bar end
-                            const y = bar.y - 10; // Slightly above center
+                            // Position badge to the left of the bar
                             const size = 20; // Badge size
+                            let x = bar.x - 45; // 45px to the left of bar end
+                            let y = bar.y - 10; // Slightly above center
+
+                            // Ensure badge stays within canvas bounds
+                            const canvasWidth = chart.width;
+                            const canvasHeight = chart.height;
+                            
+                            // Adjust x position if badge would go off left edge
+                            if (x < 0) {
+                                x = 5; // 5px margin from left edge
+                            }
+                            
+                            // Adjust y position if badge would go off top edge
+                            if (y < 0) {
+                                y = bar.y + 10; // Position below bar center instead
+                            }
+                            
+                            // Adjust y position if badge would go off bottom edge
+                            if (y + size > canvasHeight) {
+                                y = canvasHeight - size - 5; // 5px margin from bottom
+                            }
 
                             ctx.drawImage(img, x, y, size, size);
                         }
                     });
                 } else if (chart.config.type === 'scatter') {
-                    // For scatter charts - display badges next to matching dots
+                    // For scatter charts - display badges next to dots based on badge column data
                     dataset.data.forEach((point, index) => {
                         let badgeImageUrl = null;
+                        const badgeValue = badgesData && badgesData[index] ? badgesData[index].trim() : '';
 
-                        // For scatter charts, get product name from the passed overlaysData
-                        let productName = '';
-
-                        // Use the overlaysData parameter which contains the correct normalized data
-                        if (overlaysData && overlaysData.length > 0 && overlaysData[index]) {
-                            // Extract product name from the overlay string (e.g., "Product: Six Moon Designs Wy'East")
-                            const overlayParts = overlaysData[index].split(' • ');
-                            const rawProductName = overlayParts[0] || '';
-                            // Remove "Product: " prefix if it exists
-                            productName = rawProductName.replace(/^Product:\s*/, '');
-                        }
-
-                        // Check for matches (case-insensitive and trimmed)
-                        const normalizedProductName = productName.trim().toLowerCase();
-                        const normalizedEditorsPickText = (editorsPickText || '').trim().toLowerCase();
-                        const normalizedBudgetBuyText = (budgetBuyText || '').trim().toLowerCase();
-
-                        if (editorsPickText && normalizedProductName === normalizedEditorsPickText && editorsPickImage) {
+                        // Check badge column value and assign appropriate image
+                        if (badgeValue && badgeValue.toLowerCase().includes('editor') && editorsPickImage) {
                             badgeImageUrl = editorsPickImage;
-                        } else if (budgetBuyText && normalizedProductName === normalizedBudgetBuyText && budgetBuyImage) {
+                        } else if (badgeValue && badgeValue.toLowerCase().includes('budget') && budgetBuyImage) {
                             badgeImageUrl = budgetBuyImage;
                         }
 
@@ -220,10 +231,29 @@ registerBlockType(metadata, {
                             const dot = meta.data[index];
                             const img = preloadedImages[badgeImageUrl];
 
-                            // Position badge next to the dot
-                            const x = dot.x + 10; // 10px to the right of dot
-                            const y = dot.y - 10; // 10px above dot center
+                            // Position badge next to the dot with bounds checking
                             const size = 16; // Badge size for scatter
+                            let x = dot.x + 10; // 10px to the right of dot
+                            let y = dot.y - 10; // 10px above dot center
+
+                            // Ensure badge stays within canvas bounds
+                            const canvasWidth = chart.width;
+                            const canvasHeight = chart.height;
+                            
+                            // Adjust x position if badge would go off right edge
+                            if (x + size > canvasWidth) {
+                                x = dot.x - size - 10; // Position to the left of dot instead
+                            }
+                            
+                            // Adjust y position if badge would go off top edge
+                            if (y < 0) {
+                                y = dot.y + 10; // Position below dot instead
+                            }
+                            
+                            // Adjust y position if badge would go off bottom edge
+                            if (y + size > canvasHeight) {
+                                y = canvasHeight - size - 5; // 5px margin from bottom
+                            }
 
                             ctx.drawImage(img, x, y, size, size);
                         }
@@ -235,7 +265,7 @@ registerBlockType(metadata, {
         });
 
         // helper for chartType config settings
-        function getChartConfig(type, { labels, values, overlays, colors, barColor, preloadedImages = {} }) {
+        function getChartConfig(type, { labels, values, badges, overlays, colors, barColor, preloadedImages = {} }) {
             if (type === 'scatter') {
                 // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
                 const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
@@ -257,11 +287,13 @@ registerBlockType(metadata, {
                 // Calculate appropriate step size for ticks
                 const getStepSize = (min, max) => {
                     const range = max - min;
+                    if (range <= 0.5) return 0.1;
                     if (range <= 1) return 0.1;
-                    if (range <= 2) return 0.2;
+                    if (range <= 2) return 0.1; // More granular for rating data
+                    if (range <= 3) return 0.2;
                     if (range <= 5) return 0.5;
                     if (range <= 10) return 1;
-                    return Math.ceil(range / 6);
+                    return Math.ceil(range / 8); // More ticks for larger ranges
                 };
 
                 return {
@@ -367,12 +399,30 @@ registerBlockType(metadata, {
                                     },
                                     afterLabel: (ctx) => {
                                         const i = ctx.dataIndex;
+                                        const lines = [];
+                                        
                                         if (overlays[i]) {
                                             // Show remaining overlay items (skip first one used as title)
                                             const overlayParts = overlays[i].split(' • ');
-                                            return overlayParts.slice(1); // Return remaining items as array
+                                            lines.push(...overlayParts.slice(1)); // Return remaining items as array
                                         }
-                                        return '';
+                                        
+                                        // Add badge information if present
+                                        if (badges && badges[i] && badges[i].trim() !== '') {
+                                            const globalSettings = window.gstcSettings?.badgeSettings || {};
+                                            const badgeValue = badges[i].toLowerCase();
+                                            let badgeText = badges[i]; // fallback to original value
+                                            
+                                            if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                                                badgeText = globalSettings.editor_pick_badge_text;
+                                            } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                                                badgeText = globalSettings.budget_badge_text;
+                                            }
+                                            
+                                            lines.push(`**${badgeText}**`); 
+                                        }
+                                        
+                                        return lines;
                                     },
                                 },
                             } : {
@@ -381,11 +431,29 @@ registerBlockType(metadata, {
                                         const p = ctx.raw;
                                         return `${p.origLabel || `${ctx.parsed.x}`}: ${ctx.parsed.y}`;
                                     },
+                                    afterLabel: (ctx) => {
+                                        const i = ctx.dataIndex;
+                                        // Add badge information even when no overlays
+                                        if (badges && badges[i] && badges[i].trim() !== '') {
+                                            const globalSettings = window.gstcSettings?.badgeSettings || {};
+                                            const badgeValue = badges[i].toLowerCase();
+                                            let badgeText = badges[i]; // fallback to original value
+                                            
+                                            if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                                                badgeText = globalSettings.editor_pick_badge_text;
+                                            } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                                                badgeText = globalSettings.budget_badge_text;
+                                            }
+                                            
+                                            return [`**${badgeText}**`];
+                                        }
+                                        return '';
+                                    },
                                 },
                             },
                         },
                     },
-                    plugins: [createBadgePlugin(preloadedImages, overlays)],
+                    plugins: [createBadgePlugin(preloadedImages, badges)],
                 };
             }
 
@@ -426,18 +494,57 @@ registerBlockType(metadata, {
                             callbacks: {
                                 afterLabel: (ctx) => {
                                     const i = ctx.dataIndex;
+                                    const lines = [];
+                                    
                                     if (overlays[i]) {
                                         // each item should be on it's own line
                                         const overlayParts = overlays[i].split(' • ');
-                                        return overlayParts;
+                                        lines.push(...overlayParts);
+                                    }
+                                    
+                                    // Add badge information if present
+                                    if (badges && badges[i] && badges[i].trim() !== '') {
+                                        const globalSettings = window.gstcSettings?.badgeSettings || {};
+                                        const badgeValue = badges[i].toLowerCase();
+                                        let badgeText = badges[i]; // fallback to original value
+                                        
+                                        if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                                            badgeText = globalSettings.editor_pick_badge_text;
+                                        } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                                            badgeText = globalSettings.budget_badge_text;
+                                        }
+                                        
+                                        lines.push(`**${badgeText}**`); 
+                                    }
+                                    
+                                    return lines;
+                                },
+                            },
+                        } : {
+                            callbacks: {
+                                afterLabel: (ctx) => {
+                                    const i = ctx.dataIndex;
+                                    // Add badge information even when no overlays
+                                    if (badges && badges[i] && badges[i].trim() !== '') {
+                                        const globalSettings = window.gstcSettings?.badgeSettings || {};
+                                        const badgeValue = badges[i].toLowerCase();
+                                        let badgeText = badges[i]; // fallback to original value
+                                        
+                                        if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                                            badgeText = globalSettings.editor_pick_badge_text;
+                                        } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                                            badgeText = globalSettings.budget_badge_text;
+                                        }
+                                        
+                                        return [`**${badgeText}**`];
                                     }
                                     return '';
                                 },
                             },
-                        } : {},
+                        },
                     },
                 },
-                plugins: [circleLabelsPlugin, createBadgePlugin(preloadedImages, overlays)],
+                plugins: [circleLabelsPlugin, createBadgePlugin(preloadedImages, badges)],
             };
         }
 
@@ -526,15 +633,16 @@ registerBlockType(metadata, {
         useEffect(() => {
             if (!previewData || !canvasRef.current) return;
 
-            let { labels, values, overlays } = normalizeForChart(previewData);
+            let { labels, values, badges, overlays } = normalizeForChart(previewData);
 
 
 
             // Apply sorting for bar charts only
             if (attributes.chartType === 'bar') {
-                const sorted = sortChartData(labels, values, overlays, attributes.sortOrder);
+                const sorted = sortChartData(labels, values, badges, overlays, attributes.sortOrder);
                 labels = sorted.labels;
                 values = sorted.values;
+                badges = sorted.badges;
                 overlays = sorted.overlays;
             }
 
@@ -559,11 +667,12 @@ registerBlockType(metadata, {
                 const imagesToLoad = [];
                 const preloadedImages = {};
 
-                if (attributes.editorsPickImage) {
-                    imagesToLoad.push(attributes.editorsPickImage);
+                const globalSettings = window.gstcSettings?.badgeSettings || {};
+                if (globalSettings.editor_pick_badge_image) {
+                    imagesToLoad.push(globalSettings.editor_pick_badge_image);
                 }
-                if (attributes.budgetBuyImage) {
-                    imagesToLoad.push(attributes.budgetBuyImage);
+                if (globalSettings.budget_badge_image) {
+                    imagesToLoad.push(globalSettings.budget_badge_image);
                 }
 
                 const loadPromises = imagesToLoad.map(url => {
@@ -589,6 +698,7 @@ registerBlockType(metadata, {
                 const cfg = getChartConfig(attributes.chartType, {
                     labels,
                     values,
+                    badges,
                     overlays,
                     colors,
                     barColor: attributes.barColor || '#3b82f6',
@@ -618,7 +728,7 @@ registerBlockType(metadata, {
                 chartRef.current = null;
             };
 
-        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel, attributes.trendlineLabel, attributes.sortOrder, attributes.axisPrependSymbol, attributes.axisSymbolSelection, attributes.editorsPickText, attributes.editorsPickImage, attributes.budgetBuyText, attributes.budgetBuyImage]);
+        }, [previewData, attributes.barColor, attributes.chartType, attributes.xAxisLabel, attributes.yAxisLabel, attributes.trendlineLabel, attributes.sortOrder, attributes.axisPrependSymbol, attributes.axisSymbolSelection]);
 
         // loads the preview up  
         useEffect(() => {
@@ -688,105 +798,7 @@ registerBlockType(metadata, {
                                         })
                                     ),
 
-                                    // Editors Pick Badge Section
-                                    createElement(
-                                        'div',
-                                        { style: { marginTop: '2rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px' } },
-                                        createElement('h4', { style: { margin: '0 0 1rem 0', fontSize: '14px', fontWeight: '600' } }, 'Editor\'s Pick Badge'),
-                                        createElement(TextControl, {
-                                            label: 'Product Name to Match',
-                                            value: editorsPickText || '',
-                                            onChange: (value) => setAttributes({ editorsPickText: value }),
-                                            help: 'Enter the exact product name to show the Editor\'s Pick badge'
-                                        }),
-                                        createElement(
-                                            'div',
-                                            { style: { marginTop: '1rem' } },
-                                            createElement('label', { style: { display: 'block', marginBottom: '0.5rem', fontSize: '13px', fontWeight: '500' } }, 'Badge Image'),
-                                            createElement(MediaUploadCheck, null,
-                                                createElement(MediaUpload, {
-                                                    onSelect: (media) => setAttributes({ editorsPickImage: media.url }),
-                                                    allowedTypes: ['image'],
-                                                    value: editorsPickImage,
-                                                    render: ({ open }) => createElement(
-                                                        'div',
-                                                        null,
-                                                        editorsPickImage ? createElement(
-                                                            'div',
-                                                            null,
-                                                            createElement('img', {
-                                                                src: editorsPickImage,
-                                                                style: { maxWidth: '100px', height: 'auto', marginBottom: '0.5rem' }
-                                                            }),
-                                                            createElement(Button, {
-                                                                onClick: open,
-                                                                variant: 'secondary',
-                                                                style: { marginRight: '0.5rem' }
-                                                            }, 'Change Image'),
-                                                            createElement(Button, {
-                                                                onClick: () => setAttributes({ editorsPickImage: '' }),
-                                                                variant: 'link',
-                                                                isDestructive: true
-                                                            }, 'Remove')
-                                                        ) : createElement(Button, {
-                                                            onClick: open,
-                                                            variant: 'secondary'
-                                                        }, 'Upload Badge Image')
-                                                    )
-                                                })
-                                            )
-                                        )
-                                    ),
 
-                                    // Budget Buy Badge Section
-                                    createElement(
-                                        'div',
-                                        { style: { marginTop: '1rem', padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px' } },
-                                        createElement('h4', { style: { margin: '0 0 1rem 0', fontSize: '14px', fontWeight: '600' } }, 'Budget Buy Badge'),
-                                        createElement(TextControl, {
-                                            label: 'Product Name to Match',
-                                            value: budgetBuyText || '',
-                                            onChange: (value) => setAttributes({ budgetBuyText: value }),
-                                            help: 'Enter the exact product name to show the Budget Buy badge'
-                                        }),
-                                        createElement(
-                                            'div',
-                                            { style: { marginTop: '1rem' } },
-                                            createElement('label', { style: { display: 'block', marginBottom: '0.5rem', fontSize: '13px', fontWeight: '500' } }, 'Badge Image'),
-                                            createElement(MediaUploadCheck, null,
-                                                createElement(MediaUpload, {
-                                                    onSelect: (media) => setAttributes({ budgetBuyImage: media.url }),
-                                                    allowedTypes: ['image'],
-                                                    value: budgetBuyImage,
-                                                    render: ({ open }) => createElement(
-                                                        'div',
-                                                        null,
-                                                        budgetBuyImage ? createElement(
-                                                            'div',
-                                                            null,
-                                                            createElement('img', {
-                                                                src: budgetBuyImage,
-                                                                style: { maxWidth: '100px', height: 'auto', marginBottom: '0.5rem' }
-                                                            }),
-                                                            createElement(Button, {
-                                                                onClick: open,
-                                                                variant: 'secondary',
-                                                                style: { marginRight: '0.5rem' }
-                                                            }, 'Change Image'),
-                                                            createElement(Button, {
-                                                                onClick: () => setAttributes({ budgetBuyImage: '' }),
-                                                                variant: 'link',
-                                                                isDestructive: true
-                                                            }, 'Remove')
-                                                        ) : createElement(Button, {
-                                                            onClick: open,
-                                                            variant: 'secondary'
-                                                        }, 'Upload Badge Image')
-                                                    )
-                                                })
-                                            )
-                                        )
-                                    )
                                 );
                             }
 

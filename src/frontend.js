@@ -6,8 +6,9 @@ Chart.register(trendlinePlugin);
 
 // - helpers (same as editor) -------------------------
 const normalizeForChart = (data) => {
-  if (!data) return { labels: [], values: [], overlays: [] };
+  if (!data) return { labels: [], values: [], overlays: [], badges: [] };
   const labels = Array.isArray(data.labels) ? data.labels.map(String) : [];
+  const badges = Array.isArray(data.badges) ? data.badges.map(String) : [];
 
   // parse numeric stats, stripping symbols like $ or %
   const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
@@ -20,6 +21,7 @@ const normalizeForChart = (data) => {
   const rowCount = Math.max(
     labels.length,
     values.length,
+    badges.length,
     ...overlayDefs.map(o => (o?.values?.length ?? 0))
   );
 
@@ -35,13 +37,13 @@ const normalizeForChart = (data) => {
     return parts.join(' • '); // what your tooltip reads via overlays[ctx.dataIndex]
   });
 
-  return { labels, values, overlays };
+  return { labels, values, badges, overlays };
 };
 
 // helper function to sort data for bar charts
-const sortChartData = (labels, values, overlays, sortOrder) => {
+const sortChartData = (labels, values, badges, overlays, sortOrder) => {
   if (!sortOrder || sortOrder === 'default') {
-    return { labels, values, overlays };
+    return { labels, values, badges, overlays };
   }
 
   // Create array of indices with data for sorting
@@ -49,6 +51,7 @@ const sortChartData = (labels, values, overlays, sortOrder) => {
     index: i,
     label,
     value: Number(values[i]),
+    badge: badges[i],
     overlay: overlays[i]
   }));
 
@@ -67,17 +70,19 @@ const sortChartData = (labels, values, overlays, sortOrder) => {
       dataWithIndices.sort((a, b) => a.value - b.value);
       break;
     default:
-      return { labels, values, overlays };
+      return { labels, values, badges, overlays };
   }
 
   // Extract sorted data
   const sortedLabels = dataWithIndices.map(item => item.label);
   const sortedValues = dataWithIndices.map(item => values[item.index]);
+  const sortedBadges = dataWithIndices.map(item => badges[item.index]);
   const sortedOverlays = dataWithIndices.map(item => item.overlay);
 
   return { 
     labels: sortedLabels, 
     values: sortedValues, 
+    badges: sortedBadges,
     overlays: sortedOverlays 
   };
 };
@@ -123,24 +128,27 @@ const circleLabelsPlugin = {
 };
 
 // helper function to create plugin for badge display
-const createBadgePlugin = (preloadedImages, overlaysData, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage) => ({
+const createBadgePlugin = (preloadedImages, badgesData, editorsPickImage, budgetBuyImage) => ({
   id: 'badgePlugin',
   afterDatasetsDraw(chart) {
     const { ctx } = chart;
     const meta = chart.getDatasetMeta(0);
     const dataset = chart.data.datasets[0];
 
+
+
     ctx.save();
 
     if (chart.config.type === 'bar') {
-      // For bar charts - display badges at the end of matching bars
+      // For bar charts - display badges at the end of bars based on badge column data
       chart.data.labels.forEach((label, index) => {
         let badgeImageUrl = null;
+        const badgeValue = badgesData && badgesData[index] ? badgesData[index].trim() : '';
 
-        // Check for matches
-        if (editorsPickText && label === editorsPickText && editorsPickImage) {
+        // Check badge column value and assign appropriate image
+        if (badgeValue.toLowerCase().includes('editor') && editorsPickImage) {
           badgeImageUrl = editorsPickImage;
-        } else if (budgetBuyText && label === budgetBuyText && budgetBuyImage) {
+        } else if (badgeValue.toLowerCase().includes('budget') && budgetBuyImage) {
           badgeImageUrl = budgetBuyImage;
         }
 
@@ -148,39 +156,43 @@ const createBadgePlugin = (preloadedImages, overlaysData, editorsPickText, edito
           const bar = meta.data[index];
           const img = preloadedImages[badgeImageUrl];
 
-          // Position badge at the end of the bar
-          const x = bar.x + 15; // 15px to the right of bar end
-          const y = bar.y - 10; // Slightly above center
+          // Position badge to the left of the bar
           const size = 20; // Badge size
+          let x = bar.x - 45; // 45px to the left of bar end
+          let y = bar.y - 10; // Slightly above center
+
+          // Ensure badge stays within canvas bounds
+          const canvasWidth = chart.width;
+          const canvasHeight = chart.height;
+          
+          // Adjust x position if badge would go off left edge
+          if (x < 0) {
+            x = 5; // 5px margin from left edge
+          }
+          
+          // Adjust y position if badge would go off top edge
+          if (y < 0) {
+            y = bar.y + 10; // Position below bar center instead
+          }
+          
+          // Adjust y position if badge would go off bottom edge
+          if (y + size > canvasHeight) {
+            y = canvasHeight - size - 5; // 5px margin from bottom
+          }
 
           ctx.drawImage(img, x, y, size, size);
         }
       });
     } else if (chart.config.type === 'scatter') {
-      // For scatter charts - display badges next to matching dots
+      // For scatter charts - display badges next to dots based on badge column data
       dataset.data.forEach((point, index) => {
         let badgeImageUrl = null;
+        const badgeValue = badgesData && badgesData[index] ? badgesData[index].trim() : '';
 
-        // For scatter charts, get product name from the passed overlaysData
-        let productName = '';
-
-        // Use the overlaysData parameter which contains the correct normalized data
-        if (overlaysData && overlaysData.length > 0 && overlaysData[index]) {
-          // Extract product name from the overlay string (e.g., "Product: Six Moon Designs Wy'East")
-          const overlayParts = overlaysData[index].split(' • ');
-          const rawProductName = overlayParts[0] || '';
-          // Remove "Product: " prefix if it exists
-          productName = rawProductName.replace(/^Product:\s*/, '');
-        }
-
-        // Check for matches (case-insensitive and trimmed)
-        const normalizedProductName = productName.trim().toLowerCase();
-        const normalizedEditorsPickText = (editorsPickText || '').trim().toLowerCase();
-        const normalizedBudgetBuyText = (budgetBuyText || '').trim().toLowerCase();
-
-        if (editorsPickText && normalizedProductName === normalizedEditorsPickText && editorsPickImage) {
+        // Check badge column value and assign appropriate image
+        if (badgeValue.toLowerCase().includes('editor') && editorsPickImage) {
           badgeImageUrl = editorsPickImage;
-        } else if (budgetBuyText && normalizedProductName === normalizedBudgetBuyText && budgetBuyImage) {
+        } else if (badgeValue.toLowerCase().includes('budget') && budgetBuyImage) {
           badgeImageUrl = budgetBuyImage;
         }
 
@@ -188,10 +200,29 @@ const createBadgePlugin = (preloadedImages, overlaysData, editorsPickText, edito
           const dot = meta.data[index];
           const img = preloadedImages[badgeImageUrl];
 
-          // Position badge next to the dot
-          const x = dot.x + 10; // 10px to the right of dot
-          const y = dot.y - 10; // 10px above dot center
+          // Position badge next to the dot with bounds checking
           const size = 16; // Badge size for scatter
+          let x = dot.x + 10; // 10px to the right of dot
+          let y = dot.y - 10; // 10px above dot center
+
+          // Ensure badge stays within canvas bounds
+          const canvasWidth = chart.width;
+          const canvasHeight = chart.height;
+          
+          // Adjust x position if badge would go off right edge
+          if (x + size > canvasWidth) {
+            x = dot.x - size - 10; // Position to the left of dot instead
+          }
+          
+          // Adjust y position if badge would go off top edge
+          if (y < 0) {
+            y = dot.y + 10; // Position below dot instead
+          }
+          
+          // Adjust y position if badge would go off bottom edge
+          if (y + size > canvasHeight) {
+            y = canvasHeight - size - 5; // 5px margin from bottom
+          }
 
           ctx.drawImage(img, x, y, size, size);
         }
@@ -203,7 +234,7 @@ const createBadgePlugin = (preloadedImages, overlaysData, editorsPickText, edito
 });
 
 // BAR CONFIG
-function getBarConfig({ labels, values, overlays, colors, barColor, title, preloadedImages = {}, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage }) {
+function getBarConfig({ labels, values, badges, overlays, colors, barColor, title, preloadedImages = {}, editorsPickImage, budgetBuyImage }) {
 
   const yValues = (Array.isArray(values) ? values : []).map((raw) => {
     const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
@@ -243,24 +274,63 @@ function getBarConfig({ labels, values, overlays, colors, barColor, title, prelo
           callbacks: {
               afterLabel: (ctx) => {
                       const i = ctx.dataIndex;
+                      const lines = [];
+                      
                       if (overlays[i]) {
                           // each item should be on it's own line
                           const overlayParts = overlays[i].split(' • ');
-                          return overlayParts;
+                          lines.push(...overlayParts);
                       }
-                      return '';
+                      
+                      // Add badge information if present
+                      if (badges && badges[i] && badges[i].trim() !== '') {
+                          const globalSettings = window.gstcGlobalBadges || {};
+                          const badgeValue = badges[i].toLowerCase();
+                          let badgeText = badges[i]; // fallback to original value
+                          
+                          if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                              badgeText = globalSettings.editor_pick_badge_text;
+                          } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                              badgeText = globalSettings.budget_badge_text;
+                          }
+                          
+                          lines.push(`**${badgeText}**`); 
+                      }
+                      
+                      return lines;
               },
           }
-        } : {},
+        } : {
+          callbacks: {
+              afterLabel: (ctx) => {
+                  const i = ctx.dataIndex;
+                  // Add badge information even when no overlays
+                  if (badges && badges[i] && badges[i].trim() !== '') {
+                      const globalSettings = window.gstcGlobalBadges || {};
+                      const badgeValue = badges[i].toLowerCase();
+                      let badgeText = badges[i]; // fallback to original value
+                      
+                      if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                          badgeText = globalSettings.editor_pick_badge_text;
+                      } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                          badgeText = globalSettings.budget_badge_text;
+                      }
+                      
+                      return [`**${badgeText}**`]; 
+                  }
+                  return '';
+              },
+          },
+        },
       }
     },
-    plugins: [circleLabelsPlugin, createBadgePlugin(preloadedImages, overlays, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage)]
+    plugins: [circleLabelsPlugin, createBadgePlugin(preloadedImages, badges, editorsPickImage, budgetBuyImage)]
   };
 }
 
 // SCATTER CONFIG
 
-function getScatterConfig({ labels, values, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages = {}, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage, axisPrependSymbol, axisSymbolSelection }) {
+function getScatterConfig({ labels, values, badges, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages = {}, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection }) {
   // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
   const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
   const xs = labels.map(toNum);
@@ -281,11 +351,13 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
   // Calculate appropriate step size for ticks
   const getStepSize = (min, max) => {
     const range = max - min;
+    if (range <= 0.5) return 0.1;
     if (range <= 1) return 0.1;
-    if (range <= 2) return 0.2;
+    if (range <= 2) return 0.1; // More granular for rating data
+    if (range <= 3) return 0.2;
     if (range <= 5) return 0.5;
     if (range <= 10) return 1;
-    return Math.ceil(range / 6);
+    return Math.ceil(range / 8); // More ticks for larger ranges
   };
 
   return {
@@ -401,12 +473,30 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
             },
             afterLabel: (ctx) => {
               const i = ctx.dataIndex;
+              const lines = [];
+              
               if (overlays[i]) {
                 // Show remaining overlay items (skip first one used as title)
                 const overlayParts = overlays[i].split(' • ');
-                return overlayParts.slice(1); // Return remaining items as array
+                lines.push(...overlayParts.slice(1)); // Return remaining items as array
               }
-              return '';
+              
+              // Add badge information if present
+              if (badges && badges[i] && badges[i].trim() !== '') {
+                const globalSettings = window.gstcGlobalBadges || {};
+                const badgeValue = badges[i].toLowerCase();
+                let badgeText = badges[i]; // fallback to original value
+                
+                if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                    badgeText = globalSettings.editor_pick_badge_text;
+                } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                    badgeText = globalSettings.budget_badge_text;
+                }
+                
+                lines.push(`**${badgeText}**`);
+              }
+              
+              return lines;
             },
           },
         } : {
@@ -415,11 +505,29 @@ function getScatterConfig({ labels, values, overlays, colors, barColor, title, x
               const p = ctx.raw;
               return `${p.origLabel || `${ctx.parsed.x}`}: ${ctx.parsed.y}`;
             },
+            afterLabel: (ctx) => {
+              const i = ctx.dataIndex;
+              // Add badge information even when no overlays
+              if (badges && badges[i] && badges[i].trim() !== '') {
+                const globalSettings = window.gstcGlobalBadges || {};
+                const badgeValue = badges[i].toLowerCase();
+                let badgeText = badges[i]; // fallback to original value
+                
+                if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                    badgeText = globalSettings.editor_pick_badge_text;
+                } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                    badgeText = globalSettings.budget_badge_text;
+                }
+                
+                return [`**${badgeText}*`]; 
+              }
+              return '';
+            },
           },
         },
       },
     },
-    plugins: [createBadgePlugin(preloadedImages, overlays, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage)],
+    plugins: [createBadgePlugin(preloadedImages, badges, editorsPickImage, budgetBuyImage)],
   };
 }
 
@@ -444,10 +552,12 @@ async function renderBlock(blockEl) {
   const yAxisLabel = blockEl.dataset.yAxisLabel || '';
   const trendlineLabel = blockEl.dataset.trendlineLabel || '';
   const sortOrder = blockEl.dataset.sortOrder || 'default';
-  const editorsPickText = blockEl.dataset.editorsPickText || '';
-  const editorsPickImage = blockEl.dataset.editorsPickImage || '';
-  const budgetBuyText = blockEl.dataset.budgetBuyText || '';
-  const budgetBuyImage = blockEl.dataset.budgetBuyImage || '';
+  // Get global badge settings (these should be available globally)
+  const globalBadges = window.gstcGlobalBadges || {};
+  const editorsPickImage = globalBadges.editor_pick_badge_image || '';
+  const budgetBuyImage = globalBadges.budget_badge_image || '';
+  
+
   const axisPrependSymbol = blockEl.dataset.axisPrependSymbol || '';
   const axisSymbolSelection = blockEl.dataset.axisSymbolSelection || '';
 
@@ -456,13 +566,16 @@ async function renderBlock(blockEl) {
 
   try {
     const data = await getCachedData(blockId);
-    let { labels, values, overlays } = normalizeForChart(data);
+    let { labels, values, badges, overlays } = normalizeForChart(data);
+
+
 
     // Apply sorting for bar charts only
     if (chartType === 'bar') {
-      const sorted = sortChartData(labels, values, overlays, sortOrder);
+      const sorted = sortChartData(labels, values, badges, overlays, sortOrder);
       labels = sorted.labels;
       values = sorted.values;
+      badges = sorted.badges;
       overlays = sorted.overlays;
     }
 
@@ -523,8 +636,8 @@ async function renderBlock(blockEl) {
     const ctx = canvas.getContext('2d');
 
     const config = (chartType === 'scatter')
-      ? getScatterConfig({ labels, values, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage, axisPrependSymbol, axisSymbolSelection })
-      : getBarConfig({ labels, values, overlays, colors, barColor, title, preloadedImages, editorsPickText, editorsPickImage, budgetBuyText, budgetBuyImage });
+      ? getScatterConfig({ labels, values, badges, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection })
+      : getBarConfig({ labels, values, badges, overlays, colors, barColor, title, preloadedImages, editorsPickImage, budgetBuyImage });
 
     const chart = new Chart(ctx, config);
     blockEl._sheetsChart = chart;
