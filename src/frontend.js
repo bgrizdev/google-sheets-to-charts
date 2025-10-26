@@ -6,11 +6,14 @@ Chart.register(trendlinePlugin);
 
 // - helpers (same as editor) -------------------------
 const normalizeForChart = (data) => {
-  if (!data) return { labels: [], values: [], overlays: [], badges: [] };
+  if (!data) return { labels: [], values: [], overlays: [], badges: [], originalStats: [] };
   const labels = Array.isArray(data.labels) ? data.labels.map(String) : [];
   const badges = Array.isArray(data.badges) ? data.badges.map(String) : [];
+  
+  // Store original stats for tooltip display
+  const originalStats = Array.isArray(data.stats) ? data.stats.map(String) : [];
 
-  // parse numeric stats, stripping symbols like $ or %
+  // parse numeric stats, extracting numbers but keeping original values
   const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
     const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
     return Number.isFinite(num) ? num : 0;
@@ -37,7 +40,7 @@ const normalizeForChart = (data) => {
     return parts.join(' • '); // what your tooltip reads via overlays[ctx.dataIndex]
   });
 
-  return { labels, values, badges, overlays };
+  return { labels, values, badges, overlays, originalStats };
 };
 
 // helper function to sort data for bar charts
@@ -330,14 +333,14 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
 
 // SCATTER CONFIG
 
-function getScatterConfig({ labels, values, badges, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages = {}, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection }) {
+function getScatterConfig({ labels, values, badges, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages = {}, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection, originalStats = [] }) {
   // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
   const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
   const xs = labels.map(toNum);
   const ys = values.map((v) => Number(v));
 
   // 2) Points with original label for tooltip
-  const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '' }));
+  const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '', origPrice: originalStats[i] ?? '' }));
 
   // detect if prices are all non-negative
   const nonNegativeX = xs.every(n => n >= 0);
@@ -447,63 +450,99 @@ function getScatterConfig({ labels, values, badges, overlays, colors, barColor, 
         tooltip: overlays.length ? {
           callbacks: {
             title: (ctx) => {
-              const i = ctx[0].dataIndex;
-              if (overlays[i]) {
-                // Extract first overlay item as title (before first bullet)
-                const overlayParts = overlays[i].split(' • ');
-                return overlayParts[0] || '';
-              }
-              return '';
+              // Find all points at the same coordinates as the hovered point
+              const hoveredPoint = ctx[0];
+              const hoveredX = hoveredPoint.parsed.x;
+              const hoveredY = hoveredPoint.parsed.y;
+              
+              // Find all overlapping points
+              const overlappingTitles = [];
+              points.forEach((point, index) => {
+                if (Math.abs(point.x - hoveredX) < 0.001 && Math.abs(point.y - hoveredY) < 0.001) {
+                  if (overlays[index]) {
+                    const overlayParts = overlays[index].split(' • ');
+                    const title = overlayParts[0] || '';
+                    if (title && !overlappingTitles.includes(title)) {
+                      overlappingTitles.push(title);
+                    }
+                  }
+                }
+              });
+              
+              return overlappingTitles;
             },
             label: (ctx) => {
-              const p = ctx.raw;
-              const hasDollar = labels.some(l => String(l).includes('$'));
-              const xValue = hasDollar ? `$${ctx.parsed.x}` : ctx.parsed.x;
-              
-              // Show axis values with their labels
+              // Show axis values only once since overlapping points have same coordinates
               const lines = [];
+              
               if (xAxisLabel) {
+                const hasDollar = labels.some(l => String(l).includes('$'));
+                const xValue = hasDollar ? `$${ctx.parsed.x}` : ctx.parsed.x;
                 lines.push(`${xAxisLabel}: ${xValue}`);
               }
               if (yAxisLabel) {
-                lines.push(`${yAxisLabel}: ${ctx.parsed.y}`);
+                const p = ctx.raw;
+                lines.push(`${yAxisLabel}: ${p.origPrice || ctx.parsed.y}`);
               }
               
               return lines;
             },
             afterLabel: (ctx) => {
-              const i = ctx.dataIndex;
-              const lines = [];
-              
-              if (overlays[i]) {
-                // Show remaining overlay items (skip first one used as title)
-                const overlayParts = overlays[i].split(' • ');
-                lines.push(...overlayParts.slice(1)); // Return remaining items as array
-              }
-              
-              // Add badge information if present
-              if (badges && badges[i] && badges[i].trim() !== '') {
-                const globalSettings = window.gstcGlobalBadges || {};
-                const badgeValue = badges[i].toLowerCase();
-                let badgeText = badges[i]; // fallback to original value
-                
-                if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
-                    badgeText = globalSettings.editor_pick_badge_text;
-                } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
-                    badgeText = globalSettings.budget_badge_text;
+              // Find all points at the same coordinates
+              const hoveredX = ctx.parsed.x;
+              const hoveredY = ctx.parsed.y;
+
+              const allLines = [];
+              const overlappingProducts = [];
+
+              // First, collect all overlapping products
+              points.forEach((point, index) => {
+                if (Math.abs(point.x - hoveredX) < 0.001 && Math.abs(point.y - hoveredY) < 0.001) {
+                  overlappingProducts.push(index);
                 }
-                
-                lines.push(`**${badgeText}**`);
-              }
-              
-              return lines;
+              });
+
+              // Then, show each product's complete information
+              overlappingProducts.forEach((index, productIndex) => {
+                const productLines = [];
+
+                if (overlays[index]) {
+                  // Show remaining overlay items (skip first one used as title)
+                  const overlayParts = overlays[index].split(' • ');
+                  productLines.push(...overlayParts.slice(1));
+                }
+
+                // Add badge information if present for THIS specific product
+                if (badges && badges[index] && badges[index].trim() !== '') {
+                  const globalSettings = window.gstcGlobalBadges || {};
+                  const badgeValue = badges[index].toLowerCase();
+                  let badgeText = badges[index]; // fallback to original value
+
+                  if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                    badgeText = globalSettings.editor_pick_badge_text;
+                  } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                    badgeText = globalSettings.budget_badge_text;
+                  }
+
+                  productLines.push(`**${badgeText}**`);
+                }
+
+                allLines.push(...productLines);
+
+                // Add separator between products (but not after the last one)
+                if (productIndex < overlappingProducts.length - 1) {
+                  allLines.push('---'); // Visual separator
+                }
+              });
+
+              return allLines;
             },
           },
         } : {
           callbacks: {
             label: (ctx) => {
               const p = ctx.raw;
-              return `${p.origLabel || `${ctx.parsed.x}`}: ${ctx.parsed.y}`;
+              return `${p.origLabel || `${ctx.parsed.x}`}: ${p.origPrice || ctx.parsed.y}`;
             },
             afterLabel: (ctx) => {
               const i = ctx.dataIndex;
@@ -519,7 +558,7 @@ function getScatterConfig({ labels, values, badges, overlays, colors, barColor, 
                     badgeText = globalSettings.budget_badge_text;
                 }
                 
-                return [`**${badgeText}*`]; 
+                return [`**${badgeText}**`]; 
               }
               return '';
             },
@@ -566,7 +605,7 @@ async function renderBlock(blockEl) {
 
   try {
     const data = await getCachedData(blockId);
-    let { labels, values, badges, overlays } = normalizeForChart(data);
+    let { labels, values, badges, overlays, originalStats } = normalizeForChart(data);
 
 
 
@@ -636,7 +675,7 @@ async function renderBlock(blockEl) {
     const ctx = canvas.getContext('2d');
 
     const config = (chartType === 'scatter')
-      ? getScatterConfig({ labels, values, badges, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection })
+      ? getScatterConfig({ labels, values, badges, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection, originalStats })
       : getBarConfig({ labels, values, badges, overlays, colors, barColor, title, preloadedImages, editorsPickImage, budgetBuyImage });
 
     const chart = new Chart(ctx, config);

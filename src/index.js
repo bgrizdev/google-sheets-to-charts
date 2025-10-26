@@ -35,12 +35,15 @@ registerBlockType(metadata, {
         // helper function to normalize data for chart
         // data = { labels: string[], stats: string[], badges: string[], overlays: [{header, values, range}] }
         const normalizeForChart = (data) => {
-            if (!data) return { labels: [], values: [], overlays: [], badges: [] };
+            if (!data) return { labels: [], values: [], overlays: [], badges: [], originalStats: [] };
 
             const labels = Array.isArray(data.labels) ? data.labels.map(String) : [];
             const badges = Array.isArray(data.badges) ? data.badges.map(String) : [];
 
-            // parse numeric stats, stripping symbols like $ or %
+            // Store original stats for tooltip display
+            const originalStats = Array.isArray(data.stats) ? data.stats.map(String) : [];
+
+            // parse numeric stats, extracting numbers but keeping original values
             const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
                 const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
                 return Number.isFinite(num) ? num : 0;
@@ -67,7 +70,7 @@ registerBlockType(metadata, {
                 return parts.join(' • '); // what your tooltip reads via overlays[ctx.dataIndex]
             });
 
-            return { labels, values, badges, overlays };
+            return { labels, values, badges, overlays, originalStats };
         };
 
         // helper function to sort data for bar charts
@@ -195,17 +198,17 @@ registerBlockType(metadata, {
                             // Ensure badge stays within canvas bounds
                             const canvasWidth = chart.width;
                             const canvasHeight = chart.height;
-                            
+
                             // Adjust x position if badge would go off left edge
                             if (x < 0) {
                                 x = 5; // 5px margin from left edge
                             }
-                            
+
                             // Adjust y position if badge would go off top edge
                             if (y < 0) {
                                 y = bar.y + 10; // Position below bar center instead
                             }
-                            
+
                             // Adjust y position if badge would go off bottom edge
                             if (y + size > canvasHeight) {
                                 y = canvasHeight - size - 5; // 5px margin from bottom
@@ -239,17 +242,17 @@ registerBlockType(metadata, {
                             // Ensure badge stays within canvas bounds
                             const canvasWidth = chart.width;
                             const canvasHeight = chart.height;
-                            
+
                             // Adjust x position if badge would go off right edge
                             if (x + size > canvasWidth) {
                                 x = dot.x - size - 10; // Position to the left of dot instead
                             }
-                            
+
                             // Adjust y position if badge would go off top edge
                             if (y < 0) {
                                 y = dot.y + 10; // Position below dot instead
                             }
-                            
+
                             // Adjust y position if badge would go off bottom edge
                             if (y + size > canvasHeight) {
                                 y = canvasHeight - size - 5; // 5px margin from bottom
@@ -265,7 +268,7 @@ registerBlockType(metadata, {
         });
 
         // helper for chartType config settings
-        function getChartConfig(type, { labels, values, badges, overlays, colors, barColor, preloadedImages = {} }) {
+        function getChartConfig(type, { labels, values, badges, overlays, colors, barColor, preloadedImages = {}, originalStats = [] }) {
             if (type === 'scatter') {
                 // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
                 const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
@@ -273,16 +276,11 @@ registerBlockType(metadata, {
                 const ys = values.map((v) => Number(v));
 
                 // 2) Points with original label for tooltip
-                const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '' }));
-
-                // detect if prices are all non-negative
-                const nonNegativeX = xs.every(n => n >= 0);
+                const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '', origPrice: originalStats[i] ?? '' }));
 
                 // Calculate dynamic ranges for better tick display
                 const xMin = Math.min(...xs);
                 const xMax = Math.max(...xs);
-                const yMin = Math.min(...ys);
-                const yMax = Math.max(...ys);
 
                 // Calculate appropriate step size for ticks
                 const getStepSize = (min, max) => {
@@ -374,62 +372,99 @@ registerBlockType(metadata, {
                             tooltip: overlays.length ? {
                                 callbacks: {
                                     title: (ctx) => {
-                                        const i = ctx[0].dataIndex;
-                                        if (overlays[i]) {
-                                            // Extract first overlay item as title (before first bullet)
-                                            const overlayParts = overlays[i].split(' • ');
-                                            return overlayParts[0] || '';
-                                        }
-                                        return '';
+                                        // Find all points at the same coordinates as the hovered point
+                                        const hoveredPoint = ctx[0];
+                                        const hoveredX = hoveredPoint.parsed.x;
+                                        const hoveredY = hoveredPoint.parsed.y;
+
+                                        // Find all overlapping points
+                                        const overlappingTitles = [];
+                                        points.forEach((point, index) => {
+                                            if (Math.abs(point.x - hoveredX) < 0.001 && Math.abs(point.y - hoveredY) < 0.001) {
+                                                if (overlays[index]) {
+                                                    const overlayParts = overlays[index].split(' • ');
+                                                    const title = overlayParts[0] || '';
+                                                    if (title && !overlappingTitles.includes(title)) {
+                                                        overlappingTitles.push(title);
+                                                    }
+                                                }
+                                            }
+                                        });
+
+                                        return overlappingTitles;
                                     },
                                     label: (ctx) => {
-                                        const hasDollar = labels.some(l => String(l).includes('$'));
-                                        const xValue = hasDollar ? `$${ctx.parsed.x}` : ctx.parsed.x;
-
-                                        // Show axis values with their labels
+                                        // Show axis values only once since overlapping points have same coordinates
                                         const lines = [];
+
                                         if (attributes.xAxisLabel) {
+                                            const hasDollar = labels.some(l => String(l).includes('$'));
+                                            const xValue = hasDollar ? `$${ctx.parsed.x}` : ctx.parsed.x;
                                             lines.push(`${attributes.xAxisLabel}: ${xValue}`);
                                         }
                                         if (attributes.yAxisLabel) {
-                                            lines.push(`${attributes.yAxisLabel}: ${ctx.parsed.y}`);
+                                            const p = ctx.raw;
+                                            lines.push(`${attributes.yAxisLabel}: ${p.origPrice || ctx.parsed.y}`);
                                         }
 
                                         return lines;
                                     },
                                     afterLabel: (ctx) => {
-                                        const i = ctx.dataIndex;
-                                        const lines = [];
-                                        
-                                        if (overlays[i]) {
-                                            // Show remaining overlay items (skip first one used as title)
-                                            const overlayParts = overlays[i].split(' • ');
-                                            lines.push(...overlayParts.slice(1)); // Return remaining items as array
-                                        }
-                                        
-                                        // Add badge information if present
-                                        if (badges && badges[i] && badges[i].trim() !== '') {
-                                            const globalSettings = window.gstcSettings?.badgeSettings || {};
-                                            const badgeValue = badges[i].toLowerCase();
-                                            let badgeText = badges[i]; // fallback to original value
-                                            
-                                            if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
-                                                badgeText = globalSettings.editor_pick_badge_text;
-                                            } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
-                                                badgeText = globalSettings.budget_badge_text;
+                                        // Find all points at the same coordinates
+                                        const hoveredX = ctx.parsed.x;
+                                        const hoveredY = ctx.parsed.y;
+
+                                        const allLines = [];
+                                        const overlappingProducts = [];
+
+                                        // First, collect all overlapping products
+                                        points.forEach((point, index) => {
+                                            if (Math.abs(point.x - hoveredX) < 0.001 && Math.abs(point.y - hoveredY) < 0.001) {
+                                                overlappingProducts.push(index);
                                             }
-                                            
-                                            lines.push(`**${badgeText}**`); 
-                                        }
-                                        
-                                        return lines;
+                                        });
+
+                                        // Then, show each product's complete information
+                                        overlappingProducts.forEach((index, productIndex) => {
+                                            const productLines = [];
+
+                                            if (overlays[index]) {
+                                                // Show remaining overlay items (skip first one used as title)
+                                                const overlayParts = overlays[index].split(' • ');
+                                                productLines.push(...overlayParts.slice(1));
+                                            }
+
+                                            // Add badge information if present for THIS specific product
+                                            if (badges && badges[index] && badges[index].trim() !== '') {
+                                                const globalSettings = window.gstcSettings?.badgeSettings || {};
+                                                const badgeValue = badges[index].toLowerCase();
+                                                let badgeText = badges[index]; // fallback to original value
+
+                                                if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
+                                                    badgeText = globalSettings.editor_pick_badge_text;
+                                                } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
+                                                    badgeText = globalSettings.budget_badge_text;
+                                                }
+
+                                                productLines.push(`**${badgeText}**`);
+                                            }
+
+                                            allLines.push(...productLines);
+
+                                            // Add separator between products (but not after the last one)
+                                            if (productIndex < overlappingProducts.length - 1) {
+                                                allLines.push('---'); // Visual separator
+                                            }
+                                        });
+
+                                        return allLines;
                                     },
                                 },
                             } : {
                                 callbacks: {
                                     label: (ctx) => {
                                         const p = ctx.raw;
-                                        return `${p.origLabel || `${ctx.parsed.x}`}: ${ctx.parsed.y}`;
+                                        return `${p.origLabel || `${ctx.parsed.x}`}: ${p.origPrice || ctx.parsed.y}`;
                                     },
                                     afterLabel: (ctx) => {
                                         const i = ctx.dataIndex;
@@ -438,13 +473,13 @@ registerBlockType(metadata, {
                                             const globalSettings = window.gstcSettings?.badgeSettings || {};
                                             const badgeValue = badges[i].toLowerCase();
                                             let badgeText = badges[i]; // fallback to original value
-                                            
+
                                             if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
                                                 badgeText = globalSettings.editor_pick_badge_text;
                                             } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
                                                 badgeText = globalSettings.budget_badge_text;
                                             }
-                                            
+
                                             return [`**${badgeText}**`];
                                         }
                                         return '';
@@ -495,28 +530,28 @@ registerBlockType(metadata, {
                                 afterLabel: (ctx) => {
                                     const i = ctx.dataIndex;
                                     const lines = [];
-                                    
+
                                     if (overlays[i]) {
                                         // each item should be on it's own line
                                         const overlayParts = overlays[i].split(' • ');
                                         lines.push(...overlayParts);
                                     }
-                                    
+
                                     // Add badge information if present
                                     if (badges && badges[i] && badges[i].trim() !== '') {
                                         const globalSettings = window.gstcSettings?.badgeSettings || {};
                                         const badgeValue = badges[i].toLowerCase();
                                         let badgeText = badges[i]; // fallback to original value
-                                        
+
                                         if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
                                             badgeText = globalSettings.editor_pick_badge_text;
                                         } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
                                             badgeText = globalSettings.budget_badge_text;
                                         }
-                                        
-                                        lines.push(`**${badgeText}**`); 
+
+                                        lines.push(`**${badgeText}**`);
                                     }
-                                    
+
                                     return lines;
                                 },
                             },
@@ -529,13 +564,13 @@ registerBlockType(metadata, {
                                         const globalSettings = window.gstcSettings?.badgeSettings || {};
                                         const badgeValue = badges[i].toLowerCase();
                                         let badgeText = badges[i]; // fallback to original value
-                                        
+
                                         if (badgeValue.includes('editor') && globalSettings.editor_pick_badge_text) {
                                             badgeText = globalSettings.editor_pick_badge_text;
                                         } else if (badgeValue.includes('budget') && globalSettings.budget_badge_text) {
                                             badgeText = globalSettings.budget_badge_text;
                                         }
-                                        
+
                                         return [`**${badgeText}**`];
                                     }
                                     return '';
@@ -633,7 +668,7 @@ registerBlockType(metadata, {
         useEffect(() => {
             if (!previewData || !canvasRef.current) return;
 
-            let { labels, values, badges, overlays } = normalizeForChart(previewData);
+            let { labels, values, badges, overlays, originalStats } = normalizeForChart(previewData);
 
 
 
@@ -702,7 +737,8 @@ registerBlockType(metadata, {
                     overlays,
                     colors,
                     barColor: attributes.barColor || '#3b82f6',
-                    preloadedImages
+                    preloadedImages,
+                    originalStats
                 });
 
                 // set font 
