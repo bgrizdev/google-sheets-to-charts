@@ -32,10 +32,9 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
         return [2, 13]; // default fallback
     };
 
-    // Get row range from the first overlay range (which should be the product names) to determine badge column range
+    // Get row range from the label range to determine badge column range
     // This ensures badges align with the product data
-    $firstOverlayRange = !empty($overlayRanges) ? $overlayRanges[0] : $labelRange;
-    [$startRow, $endRow] = $getRowsFromRange($firstOverlayRange);
+    [$startRow, $endRow] = $getRowsFromRange($labelRange);
     $badgeRange = "B{$startRow}:B{$endRow}"; // Always use column B for badges
 
     // Build one batch: label + stats + badge + each overlay + each overlay's header cell in row 1
@@ -48,7 +47,7 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
     }
     
     // Add badge header
-    $headerRanges[] = 'C1';
+    $headerRanges[] = 'B1';
 
     $allRanges = array_values(array_filter(array_merge([$labelRange, $statsRange, $badgeRange], $overlayRanges, $headerRanges)));
 
@@ -64,12 +63,38 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
 
     // Helper: find values by suffix (handles "'Sheet'!A2:A13" vs "A2:A13")
     $getBySuffix = function (string $needle) use ($rangeMap) {
+        // First try exact match
         foreach ($rangeMap as $k => $v) {
             if (str_ends_with($k, $needle) || str_ends_with($k, '!' . $needle)) {
                 return $v;
             }
         }
-        error_log('failed at getBySuffix');
+        
+        // If no exact match, try partial match for overlays (e.g., C2:CB13 should match C2:AG13)
+        if (preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $needle, $needleMatches)) {
+            $needleStartCol = $needleMatches[1];
+            $needleStartRow = $needleMatches[2];
+            $needleEndRow = $needleMatches[4];
+            
+            foreach ($rangeMap as $k => $v) {
+                $cleanKey = $k;
+                if (strpos($k, '!') !== false) {
+                    [, $cleanKey] = explode('!', $k, 2);
+                }
+                
+                if (preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $cleanKey, $keyMatches)) {
+                    $keyStartCol = $keyMatches[1];
+                    $keyStartRow = $keyMatches[2];
+                    $keyEndRow = $keyMatches[4];
+                    
+                    // Match if start column and rows match (end column can be different)
+                    if ($keyStartCol === $needleStartCol && $keyStartRow === $needleStartRow && $keyEndRow === $needleEndRow) {
+                        return $v;
+                    }
+                }
+            }
+        }
+        
         return [];
     };
 
@@ -100,9 +125,8 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
     $stats  = $colValues($getBySuffix($statsRange));
     
     // For badges, we need to preserve empty cells to maintain row alignment
-    // First, get the expected count from the first overlay (product names)
-    $firstOverlayData = !empty($overlayRanges) ? $colValues($getBySuffix($overlayRanges[0])) : $labels;
-    $expectedCount = count($firstOverlayData);
+    // Use labels count as the expected count since that's our baseline
+    $expectedCount = count($labels);
     
     $badgeMatrix = $getBySuffix($badgeRange);
     $badges = $colValuesWithEmpties($badgeMatrix, $expectedCount);
@@ -112,14 +136,14 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
     $overlaysOut = [];
     foreach ($overlayRanges as $r) {
         $col = $colFromRange($r);
-        $values = $colValues($getBySuffix($r));
+        $overlayMatrix = $getBySuffix($r);
+        $values = $colValues($overlayMatrix);
         $header = $col ? ($getBySuffix($col . '1')[0][0] ?? $col) : '';
         $overlaysOut[] = [
             'range'  => $r,
             'header' => $header,
             'values' => $values,
         ];
-
     }
 
     return [

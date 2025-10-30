@@ -66,6 +66,36 @@ add_action('admin_footer', function() {
 
 require_once __DIR__ . '/includes/sheets-api.php';
 
+// Helper function to generate unique cache filename
+function gstc_generate_cache_filename($block_id, $sheet_id, $label, $stats, $overlays) {
+    $config_hash = md5($sheet_id . '|' . $label . '|' . $stats . '|' . implode(',', $overlays));
+    return $block_id . '_' . $config_hash . '.json';
+}
+
+// Helper function to clean up old cache files (optional - can be called manually)
+function gstc_cleanup_old_cache_files() {
+    $upload_dir = wp_upload_dir();
+    $cache_dir = trailingslashit($upload_dir['basedir']) . 'sheets-cache/';
+    
+    if (!file_exists($cache_dir)) {
+        return;
+    }
+    
+    $files = glob($cache_dir . '*.json');
+    $cleaned = 0;
+    
+    foreach ($files as $file) {
+        $filename = basename($file);
+        // If filename doesn't contain underscore, it's using old naming convention
+        if (strpos($filename, '_') === false) {
+            unlink($file);
+            $cleaned++;
+        }
+    }
+    
+    return $cleaned;
+}
+
 // Add admin menu and settings
 add_action('admin_menu', 'gstc_add_admin_menu');
 add_action('admin_init', 'gstc_settings_init');
@@ -283,7 +313,6 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
     $block_id = sanitize_text_field($request->get_param('blockId'));
     $overlays_param = $request->get_param('overlays');
 
-
     if ( is_array( $overlays_param ) ) {
         $overlays = array_values( array_filter( array_map( 'sanitize_text_field', $overlays_param ), 'strlen' ) );
     } elseif ( is_string( $overlays_param ) && $overlays_param !== '' ) {
@@ -305,7 +334,9 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
         wp_mkdir_p( $dir );
     }
 
-    $filename = $dir . "{$block_id}.json";
+    // Create unique filename based on sheet configuration
+    $cache_filename = gstc_generate_cache_filename($block_id, $sheet_id, $label, $stats, $overlays);
+    $filename = $dir . $cache_filename;
 
     // check if file already exists 
     if ( file_exists( $filename ) ) {
@@ -363,7 +394,10 @@ function refresh_sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
         wp_mkdir_p( $dir );
     }
 
-    $filename = $dir . "{$block_id}.json";
+    // Create unique filename based on sheet configuration
+    $cache_filename = gstc_generate_cache_filename($block_id, $sheet_id, $label, $stats, $overlays);
+    $filename = $dir . $cache_filename;
+
 
     $data = get_google_sheet_data_batch($sheet_id, $label, $stats, $overlays);
     if (is_wp_error($data)) {
@@ -397,8 +431,26 @@ add_action('rest_api_init', function () {
 
 function sheets_chart_fetch_cached_data( WP_REST_Request $req ) {
     $block_id = sanitize_text_field( $req->get_param('blockId') );
+    $sheet_id = sanitize_text_field( $req->get_param('sheetId') );
+    $label = sanitize_text_field( $req->get_param('label') );
+    $stats = sanitize_text_field( $req->get_param('stats') );
+    $overlays_param = $req->get_param('overlays');
+
+    if ( is_array( $overlays_param ) ) {
+        $overlays = array_values( array_filter( array_map( 'sanitize_text_field', $overlays_param ), 'strlen' ) );
+    } elseif ( is_string( $overlays_param ) && $overlays_param !== '' ) {
+        $overlays = [ sanitize_text_field( $overlays_param ) ];
+    } else {
+        $overlays = [];
+    }
+
+    // Create unique filename based on sheet configuration
+    $cache_filename = gstc_generate_cache_filename($block_id, $sheet_id, $label, $stats, $overlays);
     $upload_dir = wp_upload_dir();
-    $file = trailingslashit($upload_dir['basedir']) . 'sheets-cache/' . $block_id . '.json';
+    $file = trailingslashit($upload_dir['basedir']) . 'sheets-cache/' . $cache_filename;
+    
+
+    
     if ( ! file_exists($file) ) {
       return new WP_Error('no_cache', 'No cached file', ['status' => 404]);
     }
@@ -416,8 +468,23 @@ add_action('rest_api_init', function () {
         'methods' => 'GET',
         'callback' => function($request) {
             $block_id = sanitize_text_field($request->get_param('blockId'));
+            $sheet_id = sanitize_text_field($request->get_param('sheetId'));
+            $label = sanitize_text_field($request->get_param('label'));
+            $stats = sanitize_text_field($request->get_param('stats'));
+            $overlays_param = $request->get_param('overlays');
+
+            if ( is_array( $overlays_param ) ) {
+                $overlays = array_values( array_filter( array_map( 'sanitize_text_field', $overlays_param ), 'strlen' ) );
+            } elseif ( is_string( $overlays_param ) && $overlays_param !== '' ) {
+                $overlays = [ sanitize_text_field( $overlays_param ) ];
+            } else {
+                $overlays = [];
+            }
+
+            // Create unique filename based on sheet configuration
+            $cache_filename = gstc_generate_cache_filename($block_id, $sheet_id, $label, $stats, $overlays);
             $upload_dir = wp_upload_dir();
-            $file = trailingslashit($upload_dir['basedir']) . 'sheets-cache/' . $block_id . '.json';
+            $file = trailingslashit($upload_dir['basedir']) . 'sheets-cache/' . $cache_filename;
             
             if (!file_exists($file)) {
                 return new WP_Error('no_cache', 'No cached file found', ['status' => 404]);
@@ -427,6 +494,7 @@ add_action('rest_api_init', function () {
             
             return rest_ensure_response([
                 'file_exists' => true,
+                'filename' => $cache_filename,
                 'data_structure' => array_keys($data),
                 'labels_count' => count($data['labels'] ?? []),
                 'stats_count' => count($data['stats'] ?? []),

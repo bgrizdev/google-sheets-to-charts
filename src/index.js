@@ -281,8 +281,23 @@ registerBlockType(metadata, {
                 // Calculate dynamic ranges for better tick display
                 const xMin = Math.min(...xs);
                 const xMax = Math.max(...xs);
-
-                // Fixed x-axis as requested: 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0
+                
+                // Calculate appropriate min/max with some padding
+                const xRange = xMax - xMin;
+                const xPadding = Math.max(0.2, xRange * 0.1); // At least 0.2 padding, or 10% of range
+                const dynamicXMin = Math.max(0, Math.floor((xMin - xPadding) * 10) / 10); // Round down to nearest 0.1
+                const dynamicXMax = Math.ceil((xMax + xPadding) * 10) / 10; // Round up to nearest 0.1
+                
+                // Generate label values at 0.2 intervals within the dynamic range
+                const generateLabelValues = (min, max) => {
+                    const values = [];
+                    const start = Math.ceil(min * 5) / 5; // Round up to nearest 0.2
+                    for (let i = start; i <= max; i += 0.2) {
+                        values.push(Math.round(i * 10) / 10); // Round to avoid floating point issues
+                    }
+                    return values;
+                };
+                const labelValues = generateLabelValues(dynamicXMin, dynamicXMax);
 
                 return {
                     type: 'scatter',
@@ -313,15 +328,12 @@ registerBlockType(metadata, {
                             x: {
                                 type: 'linear',
                                 beginAtZero: false,
-                                min: 3.0,
-                                max: 5.0,
+                                min: dynamicXMin,
+                                max: dynamicXMax,
                                 ticks: {
                                     stepSize: 0.1, // Show tick marks every 0.1
-                                    min: 3.0,
-                                    max: 5.0,
                                     callback: (v) => {
-                                        // Only show labels at 0.2 intervals: 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0
-                                        const labelValues = [3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0];
+                                        // Only show labels at 0.2 intervals within dynamic range
                                         if (labelValues.includes(Number(v.toFixed(1)))) {
                                             const formatted = Number(v).toFixed(1);
                                             if (axisPrependSymbol && axisSymbolSelection == 'x') {
@@ -337,7 +349,6 @@ registerBlockType(metadata, {
                                     display: true,
                                     color: (context) => {
                                         const value = Number(context.tick.value.toFixed(1));
-                                        const labelValues = [3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0];
                                         // Only show grid lines on unlabeled values (the "off values")
                                         return labelValues.includes(value) ? 'transparent' : '#e5e5e5';
                                     },
@@ -655,8 +666,30 @@ registerBlockType(metadata, {
             if (!sheetId || !blockId) return;
 
             try {
+                const overlaysToFetch = overlays.length ? overlays : (overlay ? [overlay] : []);
+                
+                // Use different data ranges based on chart type (same as refresh function)
+                const labelToUse = chartType === 'scatter' ? xAxisData : label;
+                const statsToUse = chartType === 'scatter' ? yAxisData : stats;
+                
+                const params = new URLSearchParams({
+                    blockId: blockId,
+                    sheetId: sheetId || '',
+                    label: labelToUse || '',
+                    stats: statsToUse || ''
+                });
+
+                // Add overlays as separate parameters
+                if (overlaysToFetch && Array.isArray(overlaysToFetch)) {
+                    overlaysToFetch.forEach(overlayItem => {
+                        if (overlayItem) params.append('overlays[]', overlayItem);
+                    });
+                }
+
+
+
                 const data = await apiFetch({
-                    path: `/sheets-chart/v1/cached?blockId=${encodeURIComponent(blockId)}`,
+                    path: `/sheets-chart/v1/cached?${params.toString()}`,
                     method: 'GET',
                 });
 

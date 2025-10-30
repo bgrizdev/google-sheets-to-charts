@@ -351,7 +351,22 @@ function getScatterConfig({ labels, values, badges, overlays, colors, barColor, 
   const yMin = Math.min(...ys);
   const yMax = Math.max(...ys);
   
-  // Fixed x-axis as requested: 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0
+  // Calculate appropriate min/max with some padding
+  const xRange = xMax - xMin;
+  const xPadding = Math.max(0.2, xRange * 0.1); // At least 0.2 padding, or 10% of range
+  const dynamicXMin = Math.max(0, Math.floor((xMin - xPadding) * 10) / 10); // Round down to nearest 0.1
+  const dynamicXMax = Math.ceil((xMax + xPadding) * 10) / 10; // Round up to nearest 0.1
+  
+  // Generate label values at 0.2 intervals within the dynamic range
+  const generateLabelValues = (min, max) => {
+    const values = [];
+    const start = Math.ceil(min * 5) / 5; // Round up to nearest 0.2
+    for (let i = start; i <= max; i += 0.2) {
+      values.push(Math.round(i * 10) / 10); // Round to avoid floating point issues
+    }
+    return values;
+  };
+  const labelValues = generateLabelValues(dynamicXMin, dynamicXMax);
 
   return {
     type: 'scatter',
@@ -386,15 +401,12 @@ function getScatterConfig({ labels, values, badges, overlays, colors, barColor, 
         x: {
           type: 'linear',
           beginAtZero: false,
-          min: 3.0,
-          max: 5.0,
+          min: dynamicXMin,
+          max: dynamicXMax,
           ticks: {
             stepSize: 0.1, // Show tick marks every 0.1
-            min: 3.0,
-            max: 5.0,
             callback: (v) => {
-              // Only show labels at 0.2 intervals: 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0
-              const labelValues = [3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0];
+              // Only show labels at 0.2 intervals within dynamic range
               if (labelValues.includes(Number(v.toFixed(1)))) {
                 const formatted = Number(v).toFixed(1);
                 if(axisPrependSymbol && axisSymbolSelection == 'x'){
@@ -410,7 +422,6 @@ function getScatterConfig({ labels, values, badges, overlays, colors, barColor, 
             display: true,
             color: (context) => {
               const value = Number(context.tick.value.toFixed(1));
-              const labelValues = [3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0];
               // Only show grid lines on unlabeled values (the "off values")
               return labelValues.includes(value) ? 'transparent' : '#e5e5e5';
             },
@@ -577,9 +588,24 @@ function getScatterConfig({ labels, values, badges, overlays, colors, barColor, 
 
 
 // --- fetch cached data from your REST route ------------
-async function getCachedData(blockId) {
+async function getCachedData(blockId, sheetId, label, stats, overlays) {
+  const params = new URLSearchParams({
+    blockId: blockId,
+    sheetId: sheetId || '',
+    label: label || '',
+    stats: stats || ''
+  });
 
-  const url = `/wp-json/sheets-chart/v1/cached?blockId=${encodeURIComponent(blockId)}`;
+  // Add overlays as separate parameters
+  if (overlays && Array.isArray(overlays)) {
+    overlays.forEach(overlay => {
+      if (overlay) params.append('overlays[]', overlay);
+    });
+  } else if (overlays) {
+    params.append('overlays', overlays);
+  }
+
+  const url = `/wp-json/sheets-chart/v1/cached?${params.toString()}`;
 
   const res = await fetch(url, { credentials: 'same-origin' });
   if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
@@ -590,7 +616,24 @@ async function getCachedData(blockId) {
 async function renderBlock(blockEl) {
   const title = blockEl.dataset.sheetTitle || '';
   const blockId = blockEl.dataset.blockId || '';
+  const sheetId = blockEl.dataset.sheetId || '';
+  const label = blockEl.dataset.label || '';
+  const stats = blockEl.dataset.stats || '';
+  const xAxisData = blockEl.dataset.xAxisData || '';
+  const yAxisData = blockEl.dataset.yAxisData || '';
+  const overlaysStr = blockEl.dataset.overlays || '';
+  let overlays = [];
+  try {
+    overlays = overlaysStr ? JSON.parse(overlaysStr) : [];
+  } catch (e) {
+    console.error('Error parsing overlays:', e, overlaysStr);
+    overlays = [];
+  }
   const chartType = blockEl.dataset.chartType || 'bar';
+  
+  // Use different data ranges based on chart type (same as editor)
+  const labelToUse = chartType === 'scatter' ? xAxisData : label;
+  const statsToUse = chartType === 'scatter' ? yAxisData : stats;
   const barColor = blockEl.dataset.barColor || '#3b82f6';
   const xAxisLabel = blockEl.dataset.xAxisLabel || '';
   const yAxisLabel = blockEl.dataset.yAxisLabel || '';
@@ -609,23 +652,25 @@ async function renderBlock(blockEl) {
   if (!canvas) return;
 
   try {
-    const data = await getCachedData(blockId);
-    let { labels, values, badges, overlays, originalStats } = normalizeForChart(data);
+
+    const data = await getCachedData(blockId, sheetId, labelToUse, statsToUse, overlays);
+
+    let { labels, values, badges, overlays: overlayTooltips, originalStats } = normalizeForChart(data);
 
 
 
     // Apply sorting for bar charts only
     if (chartType === 'bar') {
-      const sorted = sortChartData(labels, values, badges, overlays, sortOrder);
+      const sorted = sortChartData(labels, values, badges, overlayTooltips, sortOrder);
       labels = sorted.labels;
       values = sorted.values;
       badges = sorted.badges;
-      overlays = sorted.overlays;
+      overlayTooltips = sorted.overlays;
     }
 
     // color ramp by value
-    const maxVal = Math.max(...values);
-    const minVal = Math.min(...values);
+    const maxVal = values.length > 0 ? Math.max(...values) : 0;
+    const minVal = values.length > 0 ? Math.min(...values) : 0;
     const colors = values.map(v => {
       const t = (v - minVal) / (maxVal - minVal || 1); // avoid /0
       const alpha = 0.5 + t * 0.5; // 0.5 → 1
@@ -680,19 +725,19 @@ async function renderBlock(blockEl) {
     const ctx = canvas.getContext('2d');
 
     const config = (chartType === 'scatter')
-      ? getScatterConfig({ labels, values, badges, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection, originalStats })
-      : getBarConfig({ labels, values, badges, overlays, colors, barColor, title, preloadedImages, editorsPickImage, budgetBuyImage });
+      ? getScatterConfig({ labels, values, badges, overlays: overlayTooltips, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection, originalStats })
+      : getBarConfig({ labels, values, badges, overlays: overlayTooltips, colors, barColor, title, preloadedImages, editorsPickImage, budgetBuyImage });
 
     const chart = new Chart(ctx, config);
     blockEl._sheetsChart = chart;
 
   } catch (e) {
     // optional: show a small message if no cache yet
+
     const wrap = blockEl.querySelector('.sheets-chart-canvas-wrap');
     if (wrap) {
       wrap.innerHTML = '<em style="font:14px/1.4 sans-serif">No cached data yet. Please fetch data in the editor.</em>';
     }
-    console.error(e);
   }
 }
 
