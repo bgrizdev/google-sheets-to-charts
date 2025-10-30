@@ -6,6 +6,7 @@
     "build",
     "includes",
     "vendor",
+    "assets",
     "package.json",
     "composer.json",
     "google-sheets-to-chart.php"
