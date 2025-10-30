@@ -124,7 +124,7 @@ const circleLabelsPlugin = {
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(value, x, y);
+      ctx.fillText(Number(value).toFixed(1), x, y);
     });
     ctx.restore();
   }
@@ -275,6 +275,10 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
         },
         tooltip: overlays.length ? {
           callbacks: {
+              label: (ctx) => {
+                  // Format the main tooltip value to always show one decimal place
+                  return `${ctx.dataset.label || 'Value'}: ${Number(ctx.parsed.x).toFixed(1)}`;
+              },
               afterLabel: (ctx) => {
                       const i = ctx.dataIndex;
                       const lines = [];
@@ -305,6 +309,10 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
           }
         } : {
           callbacks: {
+              label: (ctx) => {
+                  // Format the main tooltip value to always show one decimal place
+                  return `${ctx.dataset.label || 'Value'}: ${Number(ctx.parsed.x).toFixed(1)}`;
+              },
               afterLabel: (ctx) => {
                   const i = ctx.dataIndex;
                   // Add badge information even when no overlays
@@ -493,7 +501,7 @@ function getScatterConfig({ labels, values, badges, overlays, colors, barColor, 
               
               if (xAxisLabel) {
                 const hasDollar = labels.some(l => String(l).includes('$'));
-                const xValue = hasDollar ? `$${ctx.parsed.x}` : ctx.parsed.x;
+                const xValue = hasDollar ? `$${ctx.parsed.x.toFixed(1)}` : ctx.parsed.x.toFixed(1);
                 lines.push(`${xAxisLabel}: ${xValue}`);
               }
               if (yAxisLabel) {
@@ -558,7 +566,7 @@ function getScatterConfig({ labels, values, badges, overlays, colors, barColor, 
           callbacks: {
             label: (ctx) => {
               const p = ctx.raw;
-              return `${p.origLabel || `${ctx.parsed.x}`}: ${p.origPrice || ctx.parsed.y}`;
+              return `${p.origLabel || `${ctx.parsed.x.toFixed(1)}`}: ${p.origPrice || ctx.parsed.y}`;
             },
             afterLabel: (ctx) => {
               const i = ctx.dataIndex;
