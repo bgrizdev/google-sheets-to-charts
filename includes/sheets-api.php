@@ -36,7 +36,7 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
     // This ensures badges align with the product data
     $firstOverlayRange = !empty($overlayRanges) ? $overlayRanges[0] : $labelRange;
     [$startRow, $endRow] = $getRowsFromRange($firstOverlayRange);
-    $badgeRange = "C{$startRow}:C{$endRow}"; // Always use column C for badges
+    $badgeRange = "B{$startRow}:B{$endRow}"; // Always use column B for badges
 
     // Build one batch: label + stats + badge + each overlay + each overlay's header cell in row 1
     $headerRanges = [];

@@ -282,17 +282,7 @@ registerBlockType(metadata, {
                 const xMin = Math.min(...xs);
                 const xMax = Math.max(...xs);
 
-                // Calculate appropriate step size for ticks
-                const getStepSize = (min, max) => {
-                    const range = max - min;
-                    if (range <= 0.5) return 0.1;
-                    if (range <= 1) return 0.1;
-                    if (range <= 2) return 0.1; // More granular for rating data
-                    if (range <= 3) return 0.2;
-                    if (range <= 5) return 0.5;
-                    if (range <= 10) return 1;
-                    return Math.ceil(range / 8); // More ticks for larger ranges
-                };
+                // Fixed x-axis as requested: 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0
 
                 return {
                     type: 'scatter',
@@ -322,22 +312,37 @@ registerBlockType(metadata, {
                         scales: {
                             x: {
                                 type: 'linear',
-                                beginAtZero: false, // let it auto-scale based on data
-                                min: xMin - (xMax - xMin) * 0.05, // 5% padding below min
-                                max: xMax + (xMax - xMin) * 0.05, // 5% padding above max
+                                beginAtZero: false,
+                                min: 3.0,
+                                max: 5.0,
                                 ticks: {
-                                    stepSize: getStepSize(xMin, xMax),
+                                    stepSize: 0.1, // Show tick marks every 0.1
+                                    min: 3.0,
+                                    max: 5.0,
                                     callback: (v) => {
-                                        // Format to appropriate decimal places
-                                        const formatted = Number(v).toFixed(1);
-                                        if (axisPrependSymbol && axisSymbolSelection == 'x') {
-                                            return axisPrependSymbol + formatted;
-                                        } else {
-                                            return formatted;
+                                        // Only show labels at 0.2 intervals: 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0
+                                        const labelValues = [3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0];
+                                        if (labelValues.includes(Number(v.toFixed(1)))) {
+                                            const formatted = Number(v).toFixed(1);
+                                            if (axisPrependSymbol && axisSymbolSelection == 'x') {
+                                                return axisPrependSymbol + formatted;
+                                            } else {
+                                                return formatted;
+                                            }
                                         }
+                                        return ''; // Hide labels for other values
                                     },
                                 },
-                                grid: { display: false },
+                                grid: {
+                                    display: true,
+                                    color: (context) => {
+                                        const value = Number(context.tick.value.toFixed(1));
+                                        const labelValues = [3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6, 4.8, 5.0];
+                                        // Only show grid lines on unlabeled values (the "off values")
+                                        return labelValues.includes(value) ? 'transparent' : '#e5e5e5';
+                                    },
+                                    lineWidth: 0.5
+                                },
                                 drawBorder: false,
                                 title: {
                                     display: !!attributes.xAxisLabel,
