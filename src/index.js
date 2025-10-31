@@ -43,10 +43,37 @@ registerBlockType(metadata, {
             // Store original stats for tooltip display
             const originalStats = Array.isArray(data.stats) ? data.stats.map(String) : [];
 
-            // parse numeric stats, extracting numbers but keeping original values
+            // Helper function to convert weight strings to ounces
+            const convertToOunces = (weightStr) => {
+                const str = String(weightStr ?? '').toLowerCase();
+
+                // Check if it contains weight units
+                if (!str.includes('lb') && !str.includes('oz')) {
+                    // Not a weight, parse as regular number
+                    const num = parseFloat(str.replace(/[^\d.-]/g, ''));
+                    return Number.isFinite(num) ? num : 0;
+                }
+
+                let totalOunces = 0;
+
+                // Extract pounds (e.g., "1 lb" or "2 lbs")
+                const lbMatch = str.match(/(\d+(?:\.\d+)?)\s*lbs?/);
+                if (lbMatch) {
+                    totalOunces += parseFloat(lbMatch[1]) * 16; // 16 oz per lb
+                }
+
+                // Extract ounces (e.g., "9 oz" or "2.5 oz")
+                const ozMatch = str.match(/(\d+(?:\.\d+)?)\s*oz/);
+                if (ozMatch) {
+                    totalOunces += parseFloat(ozMatch[1]);
+                }
+
+                return totalOunces;
+            };
+
+            // parse numeric stats, with special handling for weights
             const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
-                const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
-                return Number.isFinite(num) ? num : 0;
+                return convertToOunces(raw);
             });
 
             // Build one tooltip line per row by joining "Header: Value" for each overlay
@@ -133,6 +160,7 @@ registerBlockType(metadata, {
                 ctx.save();
                 meta.data.forEach((bar, index) => {
                     const value = dataset.data[index];
+
                     const x = bar.x - 10;
                     const y = bar.y;
 
@@ -150,7 +178,28 @@ registerBlockType(metadata, {
                     ctx.font = 'bold 10px sans-serif';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(Number(value).toFixed(1), x, y);
+
+                    // Debug logging
+                    console.log('Circle Plugin Debug:');
+                    console.log('index:', index);
+                    console.log('chart:', chart);
+                    console.log('chart.config:', chart.config);
+                    console.log('chart.config keys:', Object.keys(chart.config));
+                    console.log('chart.config._config:', chart.config._config);
+                    console.log('chart.config._config.originalStats:', chart.config._config?.originalStats);
+                    console.log('typeof chart.config._config.originalStats:', typeof chart.config._config?.originalStats);
+
+                    // Check if we have original stats and if this looks like weight data
+                    const originalValue = chart.config._config?.originalStats?.[index];
+                    const isWeightData = originalValue && (originalValue.includes('lb') || originalValue.includes('oz'));
+
+                    console.log('originalValue:', originalValue);
+                    console.log('isWeightData:', isWeightData);
+
+                    // Use original value for weights, converted value for other data
+                    const displayValue = isWeightData ? originalValue : Number(value).toFixed(1);
+                    console.log('displayValue:', displayValue);
+                    ctx.fillText(displayValue, x, y);
                 });
                 ctx.restore();
             }
@@ -281,13 +330,13 @@ registerBlockType(metadata, {
                 // Calculate dynamic ranges for better tick display
                 const xMin = Math.min(...xs);
                 const xMax = Math.max(...xs);
-                
+
                 // Calculate appropriate min/max with some padding
                 const xRange = xMax - xMin;
                 const xPadding = Math.max(0.2, xRange * 0.1); // At least 0.2 padding, or 10% of range
                 const dynamicXMin = Math.max(0, Math.floor((xMin - xPadding) * 10) / 10); // Round down to nearest 0.1
                 const dynamicXMax = Math.ceil((xMax + xPadding) * 10) / 10; // Round up to nearest 0.1
-                
+
                 // Generate label values at 0.2 intervals within the dynamic range
                 const generateLabelValues = (min, max) => {
                     const values = [];
@@ -544,8 +593,9 @@ registerBlockType(metadata, {
                         tooltip: overlays.length ? {
                             callbacks: {
                                 label: (ctx) => {
-                                    // Format the main tooltip value to always show one decimal place
-                                    return `${ctx.dataset.label || 'Value'}: ${Number(ctx.parsed.x).toFixed(1)}`;
+                                    // Use original stats for display, converted values for chart positioning
+                                    const originalValue = originalStats[ctx.dataIndex] || ctx.parsed.x;
+                                    return `${ctx.dataset.label || 'Value'}: ${originalValue}`;
                                 },
                                 afterLabel: (ctx) => {
                                     const i = ctx.dataIndex;
@@ -578,8 +628,9 @@ registerBlockType(metadata, {
                         } : {
                             callbacks: {
                                 label: (ctx) => {
-                                    // Format the main tooltip value to always show one decimal place
-                                    return `${ctx.dataset.label || 'Value'}: ${Number(ctx.parsed.x).toFixed(1)}`;
+                                    // Use original stats for display, converted values for chart positioning
+                                    const originalValue = originalStats[ctx.dataIndex] || ctx.parsed.x;
+                                    return `${ctx.dataset.label || 'Value'}: ${originalValue}`;
                                 },
                                 afterLabel: (ctx) => {
                                     const i = ctx.dataIndex;
@@ -604,6 +655,7 @@ registerBlockType(metadata, {
                     },
                 },
                 plugins: [circleLabelsPlugin, createBadgePlugin(preloadedImages, badges)],
+                originalStats: originalStats
             };
         }
 
@@ -675,11 +727,11 @@ registerBlockType(metadata, {
 
             try {
                 const overlaysToFetch = overlays.length ? overlays : (overlay ? [overlay] : []);
-                
+
                 // Use different data ranges based on chart type (same as refresh function)
                 const labelToUse = chartType === 'scatter' ? xAxisData : label;
                 const statsToUse = chartType === 'scatter' ? yAxisData : stats;
-                
+
                 const params = new URLSearchParams({
                     blockId: blockId,
                     sheetId: sheetId || '',

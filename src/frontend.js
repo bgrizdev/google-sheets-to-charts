@@ -13,10 +13,37 @@ const normalizeForChart = (data) => {
   // Store original stats for tooltip display
   const originalStats = Array.isArray(data.stats) ? data.stats.map(String) : [];
 
-  // parse numeric stats, extracting numbers but keeping original values
+  // Helper function to convert weight strings to ounces
+  const convertToOunces = (weightStr) => {
+    const str = String(weightStr ?? '').toLowerCase();
+    
+    // Check if it contains weight units
+    if (!str.includes('lb') && !str.includes('oz')) {
+      // Not a weight, parse as regular number
+      const num = parseFloat(str.replace(/[^\d.-]/g, ''));
+      return Number.isFinite(num) ? num : 0;
+    }
+    
+    let totalOunces = 0;
+    
+    // Extract pounds (e.g., "1 lb" or "2 lbs")
+    const lbMatch = str.match(/(\d+(?:\.\d+)?)\s*lbs?/);
+    if (lbMatch) {
+      totalOunces += parseFloat(lbMatch[1]) * 16; // 16 oz per lb
+    }
+    
+    // Extract ounces (e.g., "9 oz" or "2.5 oz")
+    const ozMatch = str.match(/(\d+(?:\.\d+)?)\s*oz/);
+    if (ozMatch) {
+      totalOunces += parseFloat(ozMatch[1]);
+    }
+    
+    return totalOunces;
+  };
+
+  // parse numeric stats, with special handling for weights
   const values = (Array.isArray(data.stats) ? data.stats : []).map((raw) => {
-    const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
-    return Number.isFinite(num) ? num : 0;
+    return convertToOunces(raw);
   });
 
   // Build one tooltip line per row by joining "Header: Value" for each overlay
@@ -124,7 +151,14 @@ const circleLabelsPlugin = {
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(Number(value).toFixed(1), x, y);
+      
+      // Check if we have original stats and if this looks like weight data
+      const originalValue = chart.config._config?.originalStats?.[index];
+      const isWeightData = originalValue && (originalValue.includes('lb') || originalValue.includes('oz'));
+      
+      // Use original value for weights, converted value for other data
+      const displayValue = isWeightData ? originalValue : Number(value).toFixed(1);
+      ctx.fillText(displayValue, x, y);
     });
     ctx.restore();
   }
@@ -237,7 +271,7 @@ const createBadgePlugin = (preloadedImages, badgesData, editorsPickImage, budget
 });
 
 // BAR CONFIG
-function getBarConfig({ labels, values, badges, overlays, colors, barColor, title, preloadedImages = {}, editorsPickImage, budgetBuyImage }) {
+function getBarConfig({ labels, values, badges, overlays, colors, barColor, title, preloadedImages = {}, editorsPickImage, budgetBuyImage, originalStats = [] }) {
 
   const yValues = (Array.isArray(values) ? values : []).map((raw) => {
     const num = parseFloat(String(raw ?? '').replace(/[^\d.-]/g, ''));
@@ -276,8 +310,9 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
         tooltip: overlays.length ? {
           callbacks: {
               label: (ctx) => {
-                  // Format the main tooltip value to always show one decimal place
-                  return `${ctx.dataset.label || 'Value'}: ${Number(ctx.parsed.x).toFixed(1)}`;
+                  // Use original stats for display, converted values for chart positioning
+                  const originalValue = originalStats[ctx.dataIndex] || ctx.parsed.x;
+                  return `${ctx.dataset.label || 'Value'}: ${originalValue}`;
               },
               afterLabel: (ctx) => {
                       const i = ctx.dataIndex;
@@ -310,8 +345,9 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
         } : {
           callbacks: {
               label: (ctx) => {
-                  // Format the main tooltip value to always show one decimal place
-                  return `${ctx.dataset.label || 'Value'}: ${Number(ctx.parsed.x).toFixed(1)}`;
+                  // Use original stats for display, converted values for chart positioning
+                  const originalValue = originalStats[ctx.dataIndex] || ctx.parsed.x;
+                  return `${ctx.dataset.label || 'Value'}: ${originalValue}`;
               },
               afterLabel: (ctx) => {
                   const i = ctx.dataIndex;
@@ -335,7 +371,8 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
         },
       }
     },
-    plugins: [circleLabelsPlugin, createBadgePlugin(preloadedImages, badges, editorsPickImage, budgetBuyImage)]
+    plugins: [circleLabelsPlugin, createBadgePlugin(preloadedImages, badges, editorsPickImage, budgetBuyImage)],
+    originalStats: originalStats
   };
 }
 
@@ -734,7 +771,7 @@ async function renderBlock(blockEl) {
 
     const config = (chartType === 'scatter')
       ? getScatterConfig({ labels, values, badges, overlays: overlayTooltips, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection, originalStats })
-      : getBarConfig({ labels, values, badges, overlays: overlayTooltips, colors, barColor, title, preloadedImages, editorsPickImage, budgetBuyImage });
+      : getBarConfig({ labels, values, badges, overlays: overlayTooltips, colors, barColor, title, preloadedImages, editorsPickImage, budgetBuyImage, originalStats });
 
     const chart = new Chart(ctx, config);
     blockEl._sheetsChart = chart;
