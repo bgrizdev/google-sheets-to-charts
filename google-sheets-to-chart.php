@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Sheets Chart Block
  * Description: Connects to Google Sheets, fetches data, and displays it in a chart.js Gutenberg block.
- * Version: 1.4
+ * Version: 1.5
  * Author: Ben G
  */
 
@@ -96,6 +96,51 @@ function gstc_cleanup_old_cache_files() {
     return $cleaned;
 }
 
+// Automatic cleanup disabled to prevent accidental deletion
+// Use the manual cleanup endpoint instead: POST /wp-json/sheets-chart/v1/cleanup-cache
+
+// Helper function to extract block IDs from post content
+function gstc_extract_block_ids_from_content($content) {
+    $block_ids = [];
+    
+    // Parse blocks from content
+    $blocks = parse_blocks($content);
+    
+    foreach ($blocks as $block) {
+        if ($block['blockName'] === 'create-block/sheets-chart') {
+            if (isset($block['attrs']['blockId'])) {
+                $block_ids[] = $block['attrs']['blockId'];
+            }
+        }
+        
+        // Handle nested blocks recursively
+        if (!empty($block['innerBlocks'])) {
+            $block_ids = array_merge($block_ids, gstc_extract_block_ids_from_nested_blocks($block['innerBlocks']));
+        }
+    }
+    
+    return array_unique($block_ids);
+}
+
+// Helper function to recursively extract block IDs from nested blocks
+function gstc_extract_block_ids_from_nested_blocks($blocks) {
+    $block_ids = [];
+    
+    foreach ($blocks as $block) {
+        if ($block['blockName'] === 'create-block/sheets-chart') {
+            if (isset($block['attrs']['blockId'])) {
+                $block_ids[] = $block['attrs']['blockId'];
+            }
+        }
+        
+        if (!empty($block['innerBlocks'])) {
+            $block_ids = array_merge($block_ids, gstc_extract_block_ids_from_nested_blocks($block['innerBlocks']));
+        }
+    }
+    
+    return $block_ids;
+}
+
 // Add admin menu and settings
 add_action('admin_menu', 'gstc_add_admin_menu');
 add_action('admin_init', 'gstc_settings_init');
@@ -151,10 +196,61 @@ function gstc_settings_init() {
         'gstc_settings',
         'gstc_badges_section'
     );
+
+    add_settings_section(
+        'gstc_cache_section',
+        'Cache Management',
+        'gstc_cache_section_callback',
+        'gstc_settings'
+    );
+
+    add_settings_field(
+        'cache_cleanup',
+        'Cache Cleanup',
+        'gstc_cache_cleanup_render',
+        'gstc_settings',
+        'gstc_cache_section'
+    );
 }
 
 function gstc_badges_section_callback() {
     echo '<p>Configure global badge settings that will be used as defaults for new chart blocks.</p>';
+}
+
+function gstc_cache_section_callback() {
+    echo '<p>Manage cached chart data files. Cleanup will only remove cache files for blocks that no longer exist in your content.</p>';
+}
+
+function gstc_cache_cleanup_render() {
+    $upload_dir = wp_upload_dir();
+    $cache_dir = trailingslashit($upload_dir['basedir']) . 'sheets-cache/';
+    
+    $cache_count = 0;
+    $cache_size = 0;
+    
+    if (file_exists($cache_dir)) {
+        $files = glob($cache_dir . '*.json');
+        $cache_count = count($files);
+        foreach ($files as $file) {
+            $cache_size += filesize($file);
+        }
+    }
+    
+    $cache_size_mb = round($cache_size / 1024 / 1024, 2);
+    
+    echo '<div class="gstc-cache-info">';
+    echo '<p><strong>Current cache status:</strong></p>';
+    echo '<ul>';
+    echo '<li>Cache files: ' . $cache_count . '</li>';
+    echo '<li>Total size: ' . $cache_size_mb . ' MB</li>';
+    echo '<li>Location: ' . $cache_dir . '</li>';
+    echo '</ul>';
+    echo '</div>';
+    
+    echo '<button type="button" id="gstc-cleanup-cache" class="button button-secondary">Clean Up Orphaned Cache Files</button>';
+    echo '<div id="gstc-cleanup-result" style="margin-top: 10px;"></div>';
+    
+    echo '<p class="description">This will safely remove cache files for chart blocks that no longer exist in your content. Active charts will not be affected.</p>';
 }
 
 function gstc_budget_badge_text_render() {
@@ -258,6 +354,55 @@ function gstc_settings_page() {
             $('#' + targetId).val('');
             button.siblings('.gstc-image-preview').html('');
         });
+
+        // Cache cleanup button
+        $('#gstc-cleanup-cache').click(function(e) {
+            e.preventDefault();
+            var button = $(this);
+            var resultDiv = $('#gstc-cleanup-result');
+            
+            button.prop('disabled', true).text('Cleaning up...');
+            resultDiv.html('<p style="color: #666;">Processing...</p>');
+            
+            $.ajax({
+                url: '<?php echo rest_url('sheets-chart/v1/cleanup-cache'); ?>',
+                method: 'POST',
+                beforeSend: function(xhr) {
+                    xhr.setRequestHeader('X-WP-Nonce', '<?php echo wp_create_nonce('wp_rest'); ?>');
+                },
+                success: function(response) {
+                    if (response.success) {
+                        var message = '<div style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 10px; border-radius: 4px; margin-top: 10px;">';
+                        message += '<strong>Cleanup completed!</strong><br>';
+                        message += 'Deleted files: ' + response.deleted_count + '<br>';
+                        message += 'Active blocks: ' + response.active_blocks + '<br>';
+                        if (response.deleted_count > 0) {
+                            message += '<details style="margin-top: 10px;"><summary>Deleted files:</summary>';
+                            message += '<ul style="margin: 5px 0;">';
+                            response.orphaned_files.forEach(function(file) {
+                                message += '<li style="font-family: monospace; font-size: 12px;">' + file + '</li>';
+                            });
+                            message += '</ul></details>';
+                        }
+                        message += '</div>';
+                        resultDiv.html(message);
+                        
+                        // Refresh cache info
+                        setTimeout(function() {
+                            location.reload();
+                        }, 3000);
+                    } else {
+                        resultDiv.html('<div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 10px; border-radius: 4px;">Error: ' + (response.message || 'Unknown error') + '</div>');
+                    }
+                },
+                error: function(xhr, status, error) {
+                    resultDiv.html('<div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 10px; border-radius: 4px;">Error: ' + error + '</div>');
+                },
+                complete: function() {
+                    button.prop('disabled', false).text('Clean Up Orphaned Cache Files');
+                }
+            });
+        });
     });
     </script>
     <?php
@@ -340,7 +485,6 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
 
     // check if file already exists 
     if ( file_exists( $filename ) ) {
-        error_log('cache used');
         $cached = file_get_contents( $filename );
         $json   = json_decode( $cached, true );
         if ( $json !== null ) {
@@ -354,11 +498,8 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
     }
 
     // if file does not exist make it 
-    //$data = get_google_sheet_data_batch($sheet_id, $ranges);
-    error_log('data fetched');
     $data = get_google_sheet_data_batch($sheet_id, $label, $stats, $overlays);
     if (is_wp_error($data)) {
-        error_log('error fetching data: ' . $data->get_error_message());
         return new WP_Error('google_fetch_error', 'Failed to fetch Google Sheet data', ['status' => 500]);
     }
     file_put_contents($filename, wp_json_encode($data), LOCK_EX);
@@ -401,7 +542,6 @@ function refresh_sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
 
     $data = get_google_sheet_data_batch($sheet_id, $label, $stats, $overlays);
     if (is_wp_error($data)) {
-        error_log('error fetching data: ' . $data->get_error_message());
         return new WP_Error('google_fetch_error', 'Failed to fetch Google Sheet data', ['status' => 500]);
     }
     file_put_contents($filename, wp_json_encode($data), LOCK_EX);
@@ -429,6 +569,17 @@ add_action('rest_api_init', function () {
     ]);
 });
 
+// add endpoint for manual cache cleanup
+add_action('rest_api_init', function () {
+    register_rest_route('sheets-chart/v1', '/cleanup-cache', [
+        'methods'             => 'POST',
+        'callback'            => 'gstc_manual_cache_cleanup',
+        'permission_callback' => function () {
+            return current_user_can('manage_options');
+        }
+    ]);
+});
+
 function sheets_chart_fetch_cached_data( WP_REST_Request $req ) {
     $block_id = sanitize_text_field( $req->get_param('blockId') );
     $sheet_id = sanitize_text_field( $req->get_param('sheetId') );
@@ -449,8 +600,6 @@ function sheets_chart_fetch_cached_data( WP_REST_Request $req ) {
     $upload_dir = wp_upload_dir();
     $file = trailingslashit($upload_dir['basedir']) . 'sheets-cache/' . $cache_filename;
     
-
-    
     if ( ! file_exists($file) ) {
       return new WP_Error('no_cache', 'No cached file', ['status' => 404]);
     }
@@ -462,50 +611,82 @@ function gstc_get_badge_settings_rest() {
     return rest_ensure_response(gstc_get_badge_settings());
 }
 
-// Debug endpoint to check cached data structure
-add_action('rest_api_init', function () {
-    register_rest_route('sheets-chart/v1', '/debug-cache/(?P<blockId>[a-zA-Z0-9\-]+)', [
-        'methods' => 'GET',
-        'callback' => function($request) {
-            $block_id = sanitize_text_field($request->get_param('blockId'));
-            $sheet_id = sanitize_text_field($request->get_param('sheetId'));
-            $label = sanitize_text_field($request->get_param('label'));
-            $stats = sanitize_text_field($request->get_param('stats'));
-            $overlays_param = $request->get_param('overlays');
-
-            if ( is_array( $overlays_param ) ) {
-                $overlays = array_values( array_filter( array_map( 'sanitize_text_field', $overlays_param ), 'strlen' ) );
-            } elseif ( is_string( $overlays_param ) && $overlays_param !== '' ) {
-                $overlays = [ sanitize_text_field( $overlays_param ) ];
-            } else {
-                $overlays = [];
-            }
-
-            // Create unique filename based on sheet configuration
-            $cache_filename = gstc_generate_cache_filename($block_id, $sheet_id, $label, $stats, $overlays);
-            $upload_dir = wp_upload_dir();
-            $file = trailingslashit($upload_dir['basedir']) . 'sheets-cache/' . $cache_filename;
-            
-            if (!file_exists($file)) {
-                return new WP_Error('no_cache', 'No cached file found', ['status' => 404]);
-            }
-            
-            $data = json_decode(file_get_contents($file), true);
-            
-            return rest_ensure_response([
-                'file_exists' => true,
-                'filename' => $cache_filename,
-                'data_structure' => array_keys($data),
-                'labels_count' => count($data['labels'] ?? []),
-                'stats_count' => count($data['stats'] ?? []),
-                'badges_count' => count($data['badges'] ?? []),
-                'badges_sample' => array_slice($data['badges'] ?? [], 0, 5),
-                'overlays_count' => count($data['overlays'] ?? []),
-                'full_data' => $data
-            ]);
-        },
-        'permission_callback' => function() {
-            return current_user_can('edit_posts');
-        }
+function gstc_manual_cache_cleanup() {
+    $upload_dir = wp_upload_dir();
+    $cache_dir = trailingslashit($upload_dir['basedir']) . 'sheets-cache/';
+    
+    if (!file_exists($cache_dir)) {
+        return rest_ensure_response([
+            'success' => true,
+            'message' => 'Cache directory does not exist',
+            'deleted_count' => 0
+        ]);
+    }
+    
+    // Get all posts and pages (including drafts) that might contain blocks
+    $posts = get_posts([
+        'post_type' => ['post', 'page'],
+        'post_status' => ['publish', 'draft', 'private', 'future'],
+        'numberposts' => -1,
+        'fields' => 'ids'
     ]);
-});   
+    
+    // Collect all active block IDs
+    $active_block_ids = [];
+    $debug_info = [];
+    
+    foreach ($posts as $post_id) {
+        $post = get_post($post_id);
+        if ($post && $post->post_content) {
+            $block_ids = gstc_extract_block_ids_from_content($post->post_content);
+            if (!empty($block_ids)) {
+                $debug_info[] = [
+                    'post_id' => $post_id,
+                    'post_title' => $post->post_title,
+                    'post_status' => $post->post_status,
+                    'block_ids' => $block_ids
+                ];
+            }
+            $active_block_ids = array_merge($active_block_ids, $block_ids);
+        }
+    }
+    
+    $active_block_ids = array_unique($active_block_ids);
+    
+    // Get all cache files and check which ones are orphaned
+    $files = glob($cache_dir . '*.json');
+    $deleted_count = 0;
+    $orphaned_files = [];
+    $kept_files = [];
+    
+    foreach ($files as $file) {
+        $filename = basename($file);
+        
+        // Extract block ID from filename
+        if (preg_match('/^([a-f0-9\-]+)_[a-f0-9]+\.json$/', $filename, $matches)) {
+            $block_id = $matches[1];
+            
+            // If this block ID is not active anywhere, it's orphaned
+            if (!in_array($block_id, $active_block_ids)) {
+                $orphaned_files[] = $filename;
+                // TEMPORARILY DISABLE DELETION FOR DEBUGGING
+                // unlink($file);
+                // $deleted_count++;
+            } else {
+                $kept_files[] = $filename;
+            }
+        }
+    }
+    
+    return rest_ensure_response([
+        'success' => true,
+        'message' => "DEBUG MODE: Found {$deleted_count} files that would be deleted",
+        'deleted_count' => 0, // Set to 0 since we're not actually deleting
+        'would_delete' => $orphaned_files,
+        'keeping' => $kept_files,
+        'active_blocks' => $active_block_ids,
+        'debug_posts' => $debug_info,
+        'total_files' => count($files)
+    ]);
+}
+

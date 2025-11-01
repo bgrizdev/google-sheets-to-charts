@@ -71,9 +71,9 @@ const normalizeForChart = (data) => {
 };
 
 // helper function to sort data for bar charts
-const sortChartData = (labels, values, badges, overlays, sortOrder) => {
+const sortChartData = (labels, values, badges, overlays, sortOrder, originalStats = []) => {
   if (!sortOrder || sortOrder === 'default') {
-    return { labels, values, badges, overlays };
+    return { labels, values, badges, overlays, originalStats };
   }
 
   // Create array of indices with data for sorting
@@ -100,7 +100,7 @@ const sortChartData = (labels, values, badges, overlays, sortOrder) => {
       dataWithIndices.sort((a, b) => a.value - b.value);
       break;
     default:
-      return { labels, values, badges, overlays };
+      return { labels, values, badges, overlays, originalStats };
   }
 
   // Extract sorted data
@@ -108,12 +108,14 @@ const sortChartData = (labels, values, badges, overlays, sortOrder) => {
   const sortedValues = dataWithIndices.map(item => values[item.index]);
   const sortedBadges = dataWithIndices.map(item => badges[item.index]);
   const sortedOverlays = dataWithIndices.map(item => item.overlay);
+  const sortedOriginalStats = dataWithIndices.map(item => originalStats[item.index]);
 
   return { 
     labels: sortedLabels, 
     values: sortedValues, 
     badges: sortedBadges,
-    overlays: sortedOverlays 
+    overlays: sortedOverlays,
+    originalStats: sortedOriginalStats
   };
 };
 
@@ -139,15 +141,7 @@ const circleLabelsPlugin = {
       const x = bar.x - 10;
       const y = bar.y;
 
-      ctx.beginPath();
-      ctx.arc(x, y, 10, 0, 2 * Math.PI);
-      ctx.fillStyle = '#fff';
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = dataset.backgroundColor?.[index] || dataset.backgroundColor;
-      ctx.stroke();
-
-      ctx.fillStyle = '#000';
+      // Set text properties
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -158,7 +152,41 @@ const circleLabelsPlugin = {
       
       // Use original value for weights, converted value for other data
       const displayValue = isWeightData ? originalValue : Number(value).toFixed(1);
-      ctx.fillText(displayValue, x, y);
+
+      if (isWeightData) {
+        // For weight data, use a rounded rectangle positioned more to the left
+        const textWidth = ctx.measureText(displayValue).width;
+        const rectWidth = textWidth + 12; // padding
+        const rectHeight = 20;
+        const rectX = bar.x - rectWidth - 2; // position even closer to bar end
+        const rectY = bar.y - rectHeight / 2;
+        const cornerRadius = 10;
+
+        // Draw rounded rectangle
+        ctx.beginPath();
+        ctx.roundRect(rectX, rectY, rectWidth, rectHeight, cornerRadius);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = dataset.backgroundColor?.[index] || dataset.backgroundColor;
+        ctx.stroke();
+
+        // Draw text
+        ctx.fillStyle = '#000';
+        ctx.fillText(displayValue, rectX + rectWidth / 2, bar.y);
+      } else {
+        // For non-weight data, use the original circle
+        ctx.beginPath();
+        ctx.arc(x, y, 10, 0, 2 * Math.PI);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = dataset.backgroundColor?.[index] || dataset.backgroundColor;
+        ctx.stroke();
+
+        ctx.fillStyle = '#000';
+        ctx.fillText(displayValue, x, y);
+      }
     });
     ctx.restore();
   }
@@ -193,9 +221,15 @@ const createBadgePlugin = (preloadedImages, badgesData, editorsPickImage, budget
           const bar = meta.data[index];
           const img = preloadedImages[badgeImageUrl];
 
-          // Position badge to the left of the bar
+          // Position badge to the left of the bar, accounting for weight labels
           const size = 20; // Badge size
-          let x = bar.x - 45; // 45px to the left of bar end
+          
+          // Check if this bar has a weight label that would need more space
+          const originalValue = chart.config._config?.originalStats?.[index];
+          const isWeightData = originalValue && (originalValue.includes('lb') || originalValue.includes('oz'));
+          
+          // Position badge further left if there's a weight label
+          let x = isWeightData ? bar.x - 95 : bar.x - 45; // Even more space for weight labels
           let y = bar.y - 10; // Slightly above center
 
           // Ensure badge stays within canvas bounds
@@ -312,7 +346,10 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
               label: (ctx) => {
                   // Use original stats for display, converted values for chart positioning
                   const originalValue = originalStats[ctx.dataIndex] || ctx.parsed.x;
-                  return `${ctx.dataset.label || 'Value'}: ${originalValue}`;
+                  // Check if this is weight data to use appropriate label
+                  const isWeightData = originalValue && (originalValue.includes('lb') || originalValue.includes('oz'));
+                  const labelText = isWeightData ? 'Weight' : (ctx.dataset.label || 'Value');
+                  return `${labelText}: ${originalValue}`;
               },
               afterLabel: (ctx) => {
                       const i = ctx.dataIndex;
@@ -347,7 +384,10 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
               label: (ctx) => {
                   // Use original stats for display, converted values for chart positioning
                   const originalValue = originalStats[ctx.dataIndex] || ctx.parsed.x;
-                  return `${ctx.dataset.label || 'Value'}: ${originalValue}`;
+                  // Check if this is weight data to use appropriate label
+                  const isWeightData = originalValue && (originalValue.includes('lb') || originalValue.includes('oz'));
+                  const labelText = isWeightData ? 'Weight' : (ctx.dataset.label || 'Value');
+                  return `${labelText}: ${originalValue}`;
               },
               afterLabel: (ctx) => {
                   const i = ctx.dataIndex;
@@ -379,10 +419,37 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
 // SCATTER CONFIG
 
 function getScatterConfig({ labels, values, badges, overlays, colors, barColor, title, xAxisLabel, yAxisLabel, trendlineLabel, preloadedImages = {}, editorsPickImage, budgetBuyImage, axisPrependSymbol, axisSymbolSelection, originalStats = [] }) {
-  // 1) Parse labels like "$160" → 160 (handles "$", commas, or plain numbers)
-  const toNum = (s) => Number(String(s).replace(/[^0-9.-]/g, ''));
-  const xs = labels.map(toNum);
-  const ys = values.map((v) => Number(v));
+  // Helper function to convert weight strings to ounces (same as bar charts)
+  const convertToOunces = (weightStr) => {
+    const str = String(weightStr ?? '').toLowerCase();
+
+    // Check if it contains weight units
+    if (!str.includes('lb') && !str.includes('oz')) {
+      // Not a weight, parse as regular number
+      const num = parseFloat(str.replace(/[^\d.-]/g, ''));
+      return Number.isFinite(num) ? num : 0;
+    }
+
+    let totalOunces = 0;
+
+    // Extract pounds (e.g., "1 lb" or "2 lbs")
+    const lbMatch = str.match(/(\d+(?:\.\d+)?)\s*lbs?/);
+    if (lbMatch) {
+      totalOunces += parseFloat(lbMatch[1]) * 16; // 16 oz per lb
+    }
+
+    // Extract ounces (e.g., "9 oz" or "2.5 oz")
+    const ozMatch = str.match(/(\d+(?:\.\d+)?)\s*oz/);
+    if (ozMatch) {
+      totalOunces += parseFloat(ozMatch[1]);
+    }
+
+    return totalOunces;
+  };
+
+  // 1) Parse labels and values using weight conversion logic
+  const xs = labels.map(convertToOunces);
+  const ys = values.map(convertToOunces);
 
   // 2) Points with original label for tooltip
   const points = xs.map((x, i) => ({ x, y: ys[i], origLabel: labels[i] ?? '', origPrice: originalStats[i] ?? '' }));
@@ -706,11 +773,21 @@ async function renderBlock(blockEl) {
 
     // Apply sorting for bar charts only
     if (chartType === 'bar') {
-      const sorted = sortChartData(labels, values, badges, overlayTooltips, sortOrder);
+      console.log('FRONTEND SORTING DEBUG:');
+      console.log('Sort order:', sortOrder);
+      console.log('Values before sort:', values);
+      console.log('Labels before sort:', labels);
+      
+      const sorted = sortChartData(labels, values, badges, overlayTooltips, sortOrder, originalStats);
+      
+      console.log('Values after sort:', sorted.values);
+      console.log('Labels after sort:', sorted.labels);
+      
       labels = sorted.labels;
       values = sorted.values;
       badges = sorted.badges;
       overlayTooltips = sorted.overlays;
+      originalStats = sorted.originalStats;
     }
 
     // color ramp by value
