@@ -825,16 +825,7 @@ registerBlockType(metadata, {
 
             // Apply sorting for bar charts only
             if (attributes.chartType === 'bar') {
-                console.log('SORTING DEBUG:');
-                console.log('Sort order:', attributes.sortOrder);
-                console.log('Values before sort:', values);
-                console.log('Labels before sort:', labels);
-
                 const sorted = sortChartData(labels, values, badges, overlays, attributes.sortOrder, originalStats);
-
-                console.log('Values after sort:', sorted.values);
-                console.log('Labels after sort:', sorted.labels);
-
                 labels = sorted.labels;
                 values = sorted.values;
                 badges = sorted.badges;

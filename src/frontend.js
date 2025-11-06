@@ -773,16 +773,7 @@ async function renderBlock(blockEl) {
 
     // Apply sorting for bar charts only
     if (chartType === 'bar') {
-      console.log('FRONTEND SORTING DEBUG:');
-      console.log('Sort order:', sortOrder);
-      console.log('Values before sort:', values);
-      console.log('Labels before sort:', labels);
-      
       const sorted = sortChartData(labels, values, badges, overlayTooltips, sortOrder, originalStats);
-      
-      console.log('Values after sort:', sorted.values);
-      console.log('Labels after sort:', sorted.labels);
-      
       labels = sorted.labels;
       values = sorted.values;
       badges = sorted.badges;

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Sheets Chart Block
  * Description: Connects to Google Sheets, fetches data, and displays it in a chart.js Gutenberg block.
- * Version: 1.5
+ * Version: 1.6
  * Author: Ben G
  */
 
@@ -247,10 +247,19 @@ function gstc_cache_cleanup_render() {
     echo '</ul>';
     echo '</div>';
     
-    echo '<button type="button" id="gstc-cleanup-cache" class="button button-secondary">Clean Up Orphaned Cache Files</button>';
-    echo '<div id="gstc-cleanup-result" style="margin-top: 10px;"></div>';
+    echo '<div style="background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 4px; margin: 15px 0;">';
+    echo '<h4 style="margin-top: 0;">⚠️ Automatic Cache Cleanup Disabled</h4>';
+    echo '<p>Automatic cache cleanup has been disabled because your content appears to be in HTML format rather than WordPress block format. ';
+    echo 'This prevents the system from safely detecting which cache files are still in use.</p>';
+    echo '<p><strong>To manually clean up cache files:</strong></p>';
+    echo '<ol>';
+    echo '<li>Identify cache files you want to remove from the location above</li>';
+    echo '<li>Delete them manually via FTP or file manager</li>';
+    echo '<li>Or contact your developer for assistance</li>';
+    echo '</ol>';
+    echo '</div>';
     
-    echo '<p class="description">This will safely remove cache files for chart blocks that no longer exist in your content. Active charts will not be affected.</p>';
+    echo '<p class="description">Cache files are automatically created when you fetch chart data and are safe to leave in place.</p>';
 }
 
 function gstc_budget_badge_text_render() {
@@ -355,54 +364,7 @@ function gstc_settings_page() {
             button.siblings('.gstc-image-preview').html('');
         });
 
-        // Cache cleanup button
-        $('#gstc-cleanup-cache').click(function(e) {
-            e.preventDefault();
-            var button = $(this);
-            var resultDiv = $('#gstc-cleanup-result');
-            
-            button.prop('disabled', true).text('Cleaning up...');
-            resultDiv.html('<p style="color: #666;">Processing...</p>');
-            
-            $.ajax({
-                url: '<?php echo rest_url('sheets-chart/v1/cleanup-cache'); ?>',
-                method: 'POST',
-                beforeSend: function(xhr) {
-                    xhr.setRequestHeader('X-WP-Nonce', '<?php echo wp_create_nonce('wp_rest'); ?>');
-                },
-                success: function(response) {
-                    if (response.success) {
-                        var message = '<div style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 10px; border-radius: 4px; margin-top: 10px;">';
-                        message += '<strong>Cleanup completed!</strong><br>';
-                        message += 'Deleted files: ' + response.deleted_count + '<br>';
-                        message += 'Active blocks: ' + response.active_blocks + '<br>';
-                        if (response.deleted_count > 0) {
-                            message += '<details style="margin-top: 10px;"><summary>Deleted files:</summary>';
-                            message += '<ul style="margin: 5px 0;">';
-                            response.orphaned_files.forEach(function(file) {
-                                message += '<li style="font-family: monospace; font-size: 12px;">' + file + '</li>';
-                            });
-                            message += '</ul></details>';
-                        }
-                        message += '</div>';
-                        resultDiv.html(message);
-                        
-                        // Refresh cache info
-                        setTimeout(function() {
-                            location.reload();
-                        }, 3000);
-                    } else {
-                        resultDiv.html('<div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 10px; border-radius: 4px;">Error: ' + (response.message || 'Unknown error') + '</div>');
-                    }
-                },
-                error: function(xhr, status, error) {
-                    resultDiv.html('<div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 10px; border-radius: 4px;">Error: ' + error + '</div>');
-                },
-                complete: function() {
-                    button.prop('disabled', false).text('Clean Up Orphaned Cache Files');
-                }
-            });
-        });
+        // Cache cleanup functionality disabled
     });
     </script>
     <?php
@@ -569,16 +531,7 @@ add_action('rest_api_init', function () {
     ]);
 });
 
-// add endpoint for manual cache cleanup
-add_action('rest_api_init', function () {
-    register_rest_route('sheets-chart/v1', '/cleanup-cache', [
-        'methods'             => 'POST',
-        'callback'            => 'gstc_manual_cache_cleanup',
-        'permission_callback' => function () {
-            return current_user_can('manage_options');
-        }
-    ]);
-});
+// Cache cleanup endpoint disabled - not safe with HTML content format
 
 function sheets_chart_fetch_cached_data( WP_REST_Request $req ) {
     $block_id = sanitize_text_field( $req->get_param('blockId') );
@@ -668,25 +621,37 @@ function gstc_manual_cache_cleanup() {
             
             // If this block ID is not active anywhere, it's orphaned
             if (!in_array($block_id, $active_block_ids)) {
-                $orphaned_files[] = $filename;
-                // TEMPORARILY DISABLE DELETION FOR DEBUGGING
+                $orphaned_files[] = [
+                    'filename' => $filename,
+                    'block_id' => $block_id,
+                    'reason' => 'Block ID not found in any active posts'
+                ];
+                // DISABLE DELETION FOR DEBUGGING
                 // unlink($file);
                 // $deleted_count++;
             } else {
-                $kept_files[] = $filename;
+                $kept_files[] = [
+                    'filename' => $filename,
+                    'block_id' => $block_id,
+                    'found_in_posts' => array_filter($debug_info, function($post) use ($block_id) {
+                        return in_array($block_id, $post['block_ids']);
+                    })
+                ];
             }
         }
     }
     
     return rest_ensure_response([
         'success' => true,
-        'message' => "DEBUG MODE: Found {$deleted_count} files that would be deleted",
-        'deleted_count' => 0, // Set to 0 since we're not actually deleting
+        'message' => "DEBUG: Found " . count($orphaned_files) . " files that would be deleted",
+        'deleted_count' => 0, // Disabled for debugging
         'would_delete' => $orphaned_files,
-        'keeping' => $kept_files,
+        'kept_files' => $kept_files,
         'active_blocks' => $active_block_ids,
         'debug_posts' => $debug_info,
-        'total_files' => count($files)
+        'total_files' => count($files),
+        'posts_scanned' => count($posts),
+        'block_name_looking_for' => 'create-block/sheets-chart'
     ]);
 }
 
