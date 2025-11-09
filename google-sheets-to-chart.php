@@ -457,14 +457,15 @@ function sheets_chart_fetch_and_cache_data(WP_REST_Request $request) {
                 'path'    => $filename
             ]);
         }
+    } else {
+        // if file does not exist make it 
+        $data = get_google_sheet_data_batch($sheet_id, $label, $stats, $overlays);
+        if (is_wp_error($data)) {
+            return new WP_Error('google_fetch_error', 'Failed to fetch Google Sheet data', ['status' => 500]);
+        }
+        file_put_contents($filename, wp_json_encode($data), LOCK_EX);
     }
 
-    // if file does not exist make it 
-    $data = get_google_sheet_data_batch($sheet_id, $label, $stats, $overlays);
-    if (is_wp_error($data)) {
-        return new WP_Error('google_fetch_error', 'Failed to fetch Google Sheet data', ['status' => 500]);
-    }
-    file_put_contents($filename, wp_json_encode($data), LOCK_EX);
     return rest_ensure_response(['success' => true, 'message' => 'Data saved.', 'path' => $filename]);
 }
 
