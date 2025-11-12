@@ -51,9 +51,19 @@ function get_google_sheet_data_batch( string $spreadsheetId, string $labelRange,
 
     $allRanges = array_values(array_filter(array_merge([$labelRange, $statsRange, $badgeRange], $overlayRanges, $headerRanges)));
 
-
-
-    $resp = $service->spreadsheets_values->batchGet($spreadsheetId, ['ranges' => $allRanges]);
+    try {
+        $resp = $service->spreadsheets_values->batchGet($spreadsheetId, ['ranges' => $allRanges]);
+    } catch (\Google\Service\Exception $e) {
+        $errorData = json_decode($e->getMessage(), true);
+        $errorMessage = $errorData['error']['message'] ?? 'Unknown error';
+        $errorCode = $errorData['error']['code'] ?? 0;
+        
+        if ($errorCode === 404) {
+            throw new \Exception("Sheet not found. Please verify: 1) The Sheet ID is correct, 2) The sheet exists, 3) The sheet is shared with your service account email.");
+        }
+        
+        throw new \Exception("Failed to fetch sheet data: {$errorMessage}");
+    }
 
     // Map returned ranges -> values (keys include sheet name; we’ll match by suffix)
     $rangeMap = [];

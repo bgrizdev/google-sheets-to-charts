@@ -10,3 +10,10 @@
   height: 100% !important;
   display: block;
 }
+
+/* Mobile adjustments for bar charts with long labels */
+@media (max-width: 767px) {
+  .sheets-chart-canvas-wrap {
+    padding-left: 10px; /* Extra space for wrapped labels */
+  }
+}

@@ -196,11 +196,14 @@ const circleLabelsPlugin = {
 const createBadgePlugin = (preloadedImages, badgesData, editorsPickImage, budgetBuyImage) => ({
   id: 'badgePlugin',
   afterDatasetsDraw(chart) {
+    // Skip badge rendering on mobile
+    if (window.innerWidth < 768) {
+      return;
+    }
+
     const { ctx } = chart;
     const meta = chart.getDatasetMeta(0);
     const dataset = chart.data.datasets[0];
-
-
 
     ctx.save();
 
@@ -332,7 +335,39 @@ function getBarConfig({ labels, values, badges, overlays, colors, barColor, titl
       maintainAspectRatio: false,
       scales: {
         x: { grid: { display: false }, ticks: { display: false }, drawBorder: false },
-        y: { grid: { display: false }, ticks: { color: '#000', font: { size: 14 } }, drawBorder: false },
+        y: { 
+          grid: { display: false }, 
+          ticks: { 
+            color: '#000', 
+            font: { 
+              size: window.innerWidth < 768 ? 11 : 14 // Smaller font on mobile
+            },
+            // Enable multi-line labels
+            callback: function(value, index, ticks) {
+              const label = this.getLabelForValue(value);
+              // On mobile, wrap long labels
+              if (window.innerWidth < 768 && label.length > 20) {
+                const words = label.split(' ');
+                const lines = [];
+                let currentLine = '';
+                
+                words.forEach(word => {
+                  const testLine = currentLine ? `${currentLine} ${word}` : word;
+                  if (testLine.length > 20 && currentLine) {
+                    lines.push(currentLine);
+                    currentLine = word;
+                  } else {
+                    currentLine = testLine;
+                  }
+                });
+                if (currentLine) lines.push(currentLine);
+                return lines;
+              }
+              return label;
+            }
+          }, 
+          drawBorder: false 
+        },
       },
       plugins: {
         legend: { display: false },
@@ -488,7 +523,8 @@ function getScatterConfig({ labels, values, badges, overlays, colors, barColor, 
         data: points,
         backgroundColor: colors,
         borderColor: '#a9a9a9',
-        pointRadius: 5,
+        pointRadius: window.innerWidth < 768 ? 8 : 5, // Larger dots on mobile for easier tapping
+        pointHoverRadius: window.innerWidth < 768 ? 10 : 7, // Larger hover radius on mobile
         trendlineLinear: {
           style: '#a9a9a9',
           color: '#a9a9a9',
@@ -746,7 +782,7 @@ async function renderBlock(blockEl) {
   // Use different data ranges based on chart type (same as editor)
   const labelToUse = chartType === 'scatter' ? xAxisData : label;
   const statsToUse = chartType === 'scatter' ? yAxisData : stats;
-  const barColor = blockEl.dataset.barColor || '#3b82f6';
+  const barColor = blockEl.dataset.barColor || '#529ECC';
   const xAxisLabel = blockEl.dataset.xAxisLabel || '';
   const yAxisLabel = blockEl.dataset.yAxisLabel || '';
   const trendlineLabel = blockEl.dataset.trendlineLabel || '';
@@ -784,7 +820,22 @@ async function renderBlock(blockEl) {
     // color ramp by value
     const maxVal = values.length > 0 ? Math.max(...values) : 0;
     const minVal = values.length > 0 ? Math.min(...values) : 0;
-    const colors = values.map(v => {
+    const isMobile = window.innerWidth < 768;
+    
+    const colors = values.map((v, i) => {
+      // On mobile scatter charts, use special colors for badged products
+      if (isMobile && chartType === 'scatter' && badges && badges[i]) {
+        const badgeValue = String(badges[i]).toLowerCase().trim();
+        if (badgeValue.includes('editor')) {
+          console.log('Applying Teal color for Editor Pick:', badges[i]);
+          return '#6FCFC0'; // Teal 2 for Editor's Pick
+        } else if (badgeValue.includes('budget')) {
+          console.log('Applying Yellow color for Budget Buy:', badges[i]);
+          return '#FFD966'; // Yellow for Budget Buy
+        }
+      }
+      
+      // Default color ramp
       const t = (v - minVal) / (maxVal - minVal || 1); // avoid /0
       const alpha = 0.5 + t * 0.5; // 0.5 → 1
       return addAlphaToHex(barColor, alpha);

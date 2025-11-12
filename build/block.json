@@ -39,7 +39,7 @@
     },
     "barColor": {
       "type": "string",
-      "default": "#6FCFC0"
+      "default": "#529ECC"
     },
     "chartType": {
       "type": "string",

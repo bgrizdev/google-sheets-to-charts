@@ -840,7 +840,7 @@ registerBlockType(metadata, {
             const colors = values.map(v => {
                 const t = (v - minVal) / denom;         // 0..1
                 const alpha = 0.5 + t * 0.5;            // 0.5..1
-                return addAlphaToHex(attributes.barColor || '#3b82f6', alpha);
+                return addAlphaToHex(attributes.barColor || '#529ECC', alpha);
             });
 
             // rebuild chart when type OR data OR color changes
@@ -888,7 +888,7 @@ registerBlockType(metadata, {
                     badges,
                     overlays,
                     colors,
-                    barColor: attributes.barColor || '#3b82f6',
+                    barColor: attributes.barColor || '#529ECC',
                     preloadedImages,
                     originalStats
                 });
@@ -1185,7 +1185,7 @@ registerBlockType(metadata, {
                 'data-stats': stats,
                 'data-overlay': overlay,
                 'data-overlays': JSON.stringify(overlaysToSave),
-                'data-bar-color': barColor || '#3b82f6',
+                'data-bar-color': barColor || '#529ECC',
                 'data-x-axis-label': xAxisLabel ?? '',
                 'data-y-axis-label': yAxisLabel ?? '',
                 'data-trendline-label': trendlineLabel ?? '',
