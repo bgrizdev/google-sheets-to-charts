@@ -257,51 +257,8 @@ const createBadgePlugin = (preloadedImages, badgesData, editorsPickImage, budget
           ctx.drawImage(img, x, y, size, size);
         }
       });
-    } else if (chart.config.type === 'scatter') {
-      // For scatter charts - display badges next to dots based on badge column data
-      dataset.data.forEach((point, index) => {
-        let badgeImageUrl = null;
-        const badgeValue = badgesData && badgesData[index] ? badgesData[index].trim() : '';
-
-        // Check badge column value and assign appropriate image
-        if (badgeValue.toLowerCase().includes('editor') && editorsPickImage) {
-          badgeImageUrl = editorsPickImage;
-        } else if (badgeValue.toLowerCase().includes('budget') && budgetBuyImage) {
-          badgeImageUrl = budgetBuyImage;
-        }
-
-        if (badgeImageUrl && preloadedImages[badgeImageUrl] && meta.data[index]) {
-          const dot = meta.data[index];
-          const img = preloadedImages[badgeImageUrl];
-
-          // Position badge next to the dot with bounds checking
-          const size = 16; // Badge size for scatter
-          let x = dot.x + 10; // 10px to the right of dot
-          let y = dot.y - 10; // 10px above dot center
-
-          // Ensure badge stays within canvas bounds
-          const canvasWidth = chart.width;
-          const canvasHeight = chart.height;
-          
-          // Adjust x position if badge would go off right edge
-          if (x + size > canvasWidth) {
-            x = dot.x - size - 10; // Position to the left of dot instead
-          }
-          
-          // Adjust y position if badge would go off top edge
-          if (y < 0) {
-            y = dot.y + 10; // Position below dot instead
-          }
-          
-          // Adjust y position if badge would go off bottom edge
-          if (y + size > canvasHeight) {
-            y = canvasHeight - size - 5; // 5px margin from bottom
-          }
-
-          ctx.drawImage(img, x, y, size, size);
-        }
-      });
     }
+    // Badge icons removed from scatter plots - colors indicate badge status instead
 
     ctx.restore();
   }
@@ -823,19 +780,22 @@ async function renderBlock(blockEl) {
     const isMobile = window.innerWidth < 768;
     
     const colors = values.map((v, i) => {
-      // On mobile scatter charts, use special colors for badged products
-      if (isMobile && chartType === 'scatter' && badges && badges[i]) {
+      // For scatter charts, use badge-based colors on both mobile and desktop
+      if (chartType === 'scatter' && badges && badges[i]) {
         const badgeValue = String(badges[i]).toLowerCase().trim();
         if (badgeValue.includes('editor')) {
-          console.log('Applying Teal color for Editor Pick:', badges[i]);
           return '#6FCFC0'; // Teal 2 for Editor's Pick
         } else if (badgeValue.includes('budget')) {
-          console.log('Applying Yellow color for Budget Buy:', badges[i]);
           return '#FFD966'; // Yellow for Budget Buy
         }
       }
       
-      // Default color ramp
+      // For scatter charts without badges, use Blue 3 as default
+      if (chartType === 'scatter') {
+        return '#529ECC'; // Blue 3 default for scatter plots
+      }
+      
+      // For bar charts, use color ramp
       const t = (v - minVal) / (maxVal - minVal || 1); // avoid /0
       const alpha = 0.5 + t * 0.5; // 0.5 → 1
       return addAlphaToHex(barColor, alpha);
