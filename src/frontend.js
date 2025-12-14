@@ -196,8 +196,8 @@ const circleLabelsPlugin = {
 const createBadgePlugin = (preloadedImages, badgesData, editorsPickImage, budgetBuyImage) => ({
   id: 'badgePlugin',
   afterDatasetsDraw(chart) {
-    // Skip badge rendering on mobile
-    if (window.innerWidth < 768) {
+    // Skip badge rendering on mobile for scatter charts only
+    if (window.innerWidth < 768 && chart.config.type === 'scatter') {
       return;
     }
 
